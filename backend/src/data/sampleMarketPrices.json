@@ -1,0 +1,67 @@
+[
+  { "manufacturer": "현대", "modelName": "아반떼", "modelYear": 2019, "averagePriceKrw": 11800000, "averageMileageKm": 68000, "sampleSize": 42 },
+  { "manufacturer": "현대", "modelName": "아반떼", "modelYear": 2020, "averagePriceKrw": 13500000, "averageMileageKm": 55000, "sampleSize": 51 },
+  { "manufacturer": "현대", "modelName": "아반떼", "modelYear": 2021, "averagePriceKrw": 15900000, "averageMileageKm": 41000, "sampleSize": 63 },
+  { "manufacturer": "현대", "modelName": "아반떼", "modelYear": 2022, "averagePriceKrw": 18200000, "averageMileageKm": 28000, "sampleSize": 47 },
+  { "manufacturer": "현대", "modelName": "아반떼", "modelYear": 2023, "averagePriceKrw": 20800000, "averageMileageKm": 15000, "sampleSize": 33 },
+
+  { "manufacturer": "현대", "modelName": "쏘나타", "modelYear": 2019, "averagePriceKrw": 13200000, "averageMileageKm": 72000, "sampleSize": 39 },
+  { "manufacturer": "현대", "modelName": "쏘나타", "modelYear": 2020, "averagePriceKrw": 15600000, "averageMileageKm": 58000, "sampleSize": 55 },
+  { "manufacturer": "현대", "modelName": "쏘나타", "modelYear": 2021, "averagePriceKrw": 18300000, "averageMileageKm": 44000, "sampleSize": 61 },
+  { "manufacturer": "현대", "modelName": "쏘나타", "modelYear": 2022, "averagePriceKrw": 21500000, "averageMileageKm": 30000, "sampleSize": 44 },
+  { "manufacturer": "현대", "modelName": "쏘나타", "modelYear": 2023, "averagePriceKrw": 24700000, "averageMileageKm": 17000, "sampleSize": 28 },
+
+  { "manufacturer": "현대", "modelName": "그랜저", "modelYear": 2019, "averagePriceKrw": 18900000, "averageMileageKm": 70000, "sampleSize": 46 },
+  { "manufacturer": "현대", "modelName": "그랜저", "modelYear": 2020, "averagePriceKrw": 22400000, "averageMileageKm": 56000, "sampleSize": 58 },
+  { "manufacturer": "현대", "modelName": "그랜저", "modelYear": 2021, "averagePriceKrw": 26100000, "averageMileageKm": 42000, "sampleSize": 67 },
+  { "manufacturer": "현대", "modelName": "그랜저", "modelYear": 2022, "averagePriceKrw": 30500000, "averageMileageKm": 27000, "sampleSize": 52 },
+  { "manufacturer": "현대", "modelName": "그랜저", "modelYear": 2023, "averagePriceKrw": 35200000, "averageMileageKm": 14000, "sampleSize": 37 },
+
+  { "manufacturer": "현대", "modelName": "투싼", "modelYear": 2019, "averagePriceKrw": 15400000, "averageMileageKm": 65000, "sampleSize": 41 },
+  { "manufacturer": "현대", "modelName": "투싼", "modelYear": 2020, "averagePriceKrw": 18100000, "averageMileageKm": 52000, "sampleSize": 49 },
+  { "manufacturer": "현대", "modelName": "투싼", "modelYear": 2021, "averagePriceKrw": 21300000, "averageMileageKm": 39000, "sampleSize": 58 },
+  { "manufacturer": "현대", "modelName": "투싼", "modelYear": 2022, "averagePriceKrw": 24900000, "averageMileageKm": 25000, "sampleSize": 45 },
+  { "manufacturer": "현대", "modelName": "투싼", "modelYear": 2023, "averagePriceKrw": 28600000, "averageMileageKm": 13000, "sampleSize": 31 },
+
+  { "manufacturer": "현대", "modelName": "싼타페", "modelYear": 2019, "averagePriceKrw": 19800000, "averageMileageKm": 71000, "sampleSize": 38 },
+  { "manufacturer": "현대", "modelName": "싼타페", "modelYear": 2020, "averagePriceKrw": 23200000, "averageMileageKm": 57000, "sampleSize": 47 },
+  { "manufacturer": "현대", "modelName": "싼타페", "modelYear": 2021, "averagePriceKrw": 27100000, "averageMileageKm": 43000, "sampleSize": 54 },
+  { "manufacturer": "현대", "modelName": "싼타페", "modelYear": 2022, "averagePriceKrw": 31800000, "averageMileageKm": 28000, "sampleSize": 40 },
+  { "manufacturer": "현대", "modelName": "싼타페", "modelYear": 2023, "averagePriceKrw": 36500000, "averageMileageKm": 15000, "sampleSize": 29 },
+
+  { "manufacturer": "기아", "modelName": "K5", "modelYear": 2019, "averagePriceKrw": 12700000, "averageMileageKm": 70000, "sampleSize": 40 },
+  { "manufacturer": "기아", "modelName": "K5", "modelYear": 2020, "averagePriceKrw": 15100000, "averageMileageKm": 56000, "sampleSize": 53 },
+  { "manufacturer": "기아", "modelName": "K5", "modelYear": 2021, "averagePriceKrw": 17800000, "averageMileageKm": 42000, "sampleSize": 60 },
+  { "manufacturer": "기아", "modelName": "K5", "modelYear": 2022, "averagePriceKrw": 20900000, "averageMileageKm": 29000, "sampleSize": 46 },
+  { "manufacturer": "기아", "modelName": "K5", "modelYear": 2023, "averagePriceKrw": 24100000, "averageMileageKm": 16000, "sampleSize": 32 },
+
+  { "manufacturer": "기아", "modelName": "K8", "modelYear": 2021, "averagePriceKrw": 27300000, "averageMileageKm": 40000, "sampleSize": 44 },
+  { "manufacturer": "기아", "modelName": "K8", "modelYear": 2022, "averagePriceKrw": 31900000, "averageMileageKm": 26000, "sampleSize": 39 },
+  { "manufacturer": "기아", "modelName": "K8", "modelYear": 2023, "averagePriceKrw": 36800000, "averageMileageKm": 14000, "sampleSize": 27 },
+
+  { "manufacturer": "기아", "modelName": "스포티지", "modelYear": 2019, "averagePriceKrw": 14900000, "averageMileageKm": 66000, "sampleSize": 37 },
+  { "manufacturer": "기아", "modelName": "스포티지", "modelYear": 2020, "averagePriceKrw": 17600000, "averageMileageKm": 53000, "sampleSize": 48 },
+  { "manufacturer": "기아", "modelName": "스포티지", "modelYear": 2021, "averagePriceKrw": 20700000, "averageMileageKm": 40000, "sampleSize": 56 },
+  { "manufacturer": "기아", "modelName": "스포티지", "modelYear": 2022, "averagePriceKrw": 24300000, "averageMileageKm": 26000, "sampleSize": 43 },
+  { "manufacturer": "기아", "modelName": "스포티지", "modelYear": 2023, "averagePriceKrw": 27900000, "averageMileageKm": 13000, "sampleSize": 30 },
+
+  { "manufacturer": "기아", "modelName": "쏘렌토", "modelYear": 2019, "averagePriceKrw": 19100000, "averageMileageKm": 69000, "sampleSize": 36 },
+  { "manufacturer": "기아", "modelName": "쏘렌토", "modelYear": 2020, "averagePriceKrw": 22500000, "averageMileageKm": 55000, "sampleSize": 45 },
+  { "manufacturer": "기아", "modelName": "쏘렌토", "modelYear": 2021, "averagePriceKrw": 26300000, "averageMileageKm": 41000, "sampleSize": 52 },
+  { "manufacturer": "기아", "modelName": "쏘렌토", "modelYear": 2022, "averagePriceKrw": 30800000, "averageMileageKm": 27000, "sampleSize": 41 },
+  { "manufacturer": "기아", "modelName": "쏘렌토", "modelYear": 2023, "averagePriceKrw": 35400000, "averageMileageKm": 14000, "sampleSize": 28 },
+
+  { "manufacturer": "제네시스", "modelName": "G80", "modelYear": 2020, "averagePriceKrw": 38200000, "averageMileageKm": 50000, "sampleSize": 22 },
+  { "manufacturer": "제네시스", "modelName": "G80", "modelYear": 2021, "averagePriceKrw": 44700000, "averageMileageKm": 38000, "sampleSize": 26 },
+  { "manufacturer": "제네시스", "modelName": "G80", "modelYear": 2022, "averagePriceKrw": 52100000, "averageMileageKm": 24000, "sampleSize": 19 },
+  { "manufacturer": "제네시스", "modelName": "G80", "modelYear": 2023, "averagePriceKrw": 59800000, "averageMileageKm": 12000, "sampleSize": 15 },
+
+  { "manufacturer": "토요타", "modelName": "캠리", "modelYear": 2019, "averagePriceKrw": 20300000, "averageMileageKm": 60000, "sampleSize": 18 },
+  { "manufacturer": "토요타", "modelName": "캠리", "modelYear": 2020, "averagePriceKrw": 23600000, "averageMileageKm": 48000, "sampleSize": 21 },
+  { "manufacturer": "토요타", "modelName": "캠리", "modelYear": 2021, "averagePriceKrw": 27100000, "averageMileageKm": 36000, "sampleSize": 24 },
+  { "manufacturer": "토요타", "modelName": "캠리", "modelYear": 2022, "averagePriceKrw": 31200000, "averageMileageKm": 23000, "sampleSize": 17 },
+
+  { "manufacturer": "혼다", "modelName": "어코드", "modelYear": 2019, "averagePriceKrw": 19700000, "averageMileageKm": 62000, "sampleSize": 14 },
+  { "manufacturer": "혼다", "modelName": "어코드", "modelYear": 2020, "averagePriceKrw": 22900000, "averageMileageKm": 49000, "sampleSize": 16 },
+  { "manufacturer": "혼다", "modelName": "어코드", "modelYear": 2021, "averagePriceKrw": 26400000, "averageMileageKm": 37000, "sampleSize": 19 }
+]

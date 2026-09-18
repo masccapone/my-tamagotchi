@@ -1,0 +1,164 @@
+:root {
+  color-scheme: light;
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+  color: #1f2430;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 16px 80px;
+}
+
+header h1 {
+  margin-bottom: 4px;
+  font-size: 28px;
+}
+
+.subtitle {
+  color: #5c6270;
+  margin-top: 0;
+}
+
+.search-form {
+  display: flex;
+  gap: 8px;
+  margin: 24px 0;
+}
+
+.search-form input {
+  flex: 1;
+  padding: 12px 14px;
+  font-size: 16px;
+  border: 1px solid #d5d8de;
+  border-radius: 8px;
+}
+
+.search-form button {
+  padding: 12px 20px;
+  font-size: 16px;
+  background: #2354e6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-form button:disabled {
+  background: #9aa7c7;
+  cursor: not-allowed;
+}
+
+.error-message {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  row-gap: 8px;
+}
+
+.info-grid dt {
+  color: #5c6270;
+}
+
+.info-grid dd {
+  margin: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.muted {
+  color: #8a8f9c;
+}
+
+.risk-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.risk-list li {
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.risk-info {
+  background: #eef1f7;
+}
+
+.risk-caution {
+  background: #fff4e0;
+  color: #93650a;
+}
+
+.risk-warning {
+  background: #fde8e8;
+  color: #b02a2a;
+  font-weight: 600;
+}
+
+.estimate {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.estimate .range {
+  font-size: 14px;
+  font-weight: 400;
+  color: #5c6270;
+}
+
+.confidence {
+  margin-top: 0;
+  color: #5c6270;
+}
+
+.basis-list {
+  font-size: 13px;
+  color: #5c6270;
+}
+
+.text-warning {
+  color: #b02a2a;
+  font-weight: 600;
+}
+
+.warning-card {
+  border: 1px solid #f5c6a5;
+  background: #fff8f0;
+}
