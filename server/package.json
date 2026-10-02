@@ -1,0 +1,9 @@
+{
+  "name": "business-question-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "소규모 기업 경영정보 질문 도구의 로컬 서버 (외부 패키지 없음)",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

@@ -1,18 +1,99 @@
-/* 화면: 파일 업로드 → 모델 구성 → 요약 / 질문 / 월별 추이 */
+/* 화면: 서버 연결(로그인·저장본 불러오기·저장) 또는 단독 실행(파일 직접 올리기) → 요약 / 질문 / 월별 추이 */
 (function (g) {
   'use strict';
-  var BM = g.BM, esc = BM.esc;
+  var BM = g.BM, E = BM.engine, esc = BM.esc;
   function $(id) { return document.getElementById(id); }
 
-  var files = [];                 // {name, kind, data}
+  var files = [];                 // {name, kind, data, raw?}
   var S = null;                   // 현재 분석 상태
   var curQ = null, chart = null, useEst = true;
+  var mode = 'standalone', role = null, dirty = false, serverMeta = null;
+  var settings = { anchor: null };
+  var lastVendorText = '', lastMonth = '';
+  var JSON_H = { 'Content-Type': 'application/json' };
 
-  /* ---------- 업로드 ---------- */
+  /* ---------- 서버 통신 ---------- */
+  function api(path, opt) {
+    opt = opt || {};
+    var headers = { 'X-Requested-With': 'bm' };
+    Object.keys(opt.headers || {}).forEach(function (k) { headers[k] = opt.headers[k]; });
+    return fetch(path, { method: opt.method || 'GET', headers: headers, body: opt.body, credentials: 'same-origin' });
+  }
+  function logEvent(ev) { if (mode === 'server') api('/api/event', { method: 'POST', headers: JSON_H, body: JSON.stringify(ev) }).catch(function () { /* 로그 실패는 무시 */ }); }
+  BM.saveAnchor = function (val) {
+    settings.anchor = val;
+    if (mode === 'server') api('/api/settings', { method: 'POST', headers: JSON_H, body: JSON.stringify({ anchor: val }) }).catch(function () { /* 저장 실패 시 이번 화면에서만 사용 */ });
+    else { try { localStorage.setItem('bm-cash-anchor', JSON.stringify(val)); } catch (e) { /* 저장 불가 */ } }
+  };
+
+  /* ---------- 시작: 서버가 있으면 로그인, 없으면 단독 실행 ---------- */
+  function boot() {
+    // 서버가 없거나(파일로 직접 열었거나 단독 페이지) 응답이 JSON이 아니면 단독 실행으로 간다.
+    // 화면 코드의 오류가 단독 실행으로 조용히 넘어가지 않도록 네트워크 실패만 따로 처리한다.
+    if (g.location && g.location.protocol === 'file:') { enterStandalone(); return; }
+    fetch('/api/me', { credentials: 'same-origin', headers: { 'X-Requested-With': 'bm' } }).then(function (res) {
+      if ((res.headers.get('content-type') || '').indexOf('application/json') < 0) return 'none';
+      if (res.status === 401) return 'login';
+      return res.json().catch(function () { return 'none'; });
+    }, function () { return 'none'; }).then(function (r) {
+      if (r === 'none') enterStandalone();
+      else if (r === 'login') { mode = 'server'; showLogin(); }
+      else enterServer(r.role);
+    });
+  }
+
+  function enterStandalone() {
+    mode = 'standalone';
+    try { settings.anchor = JSON.parse(localStorage.getItem('bm-cash-anchor') || 'null'); } catch (e) { settings.anchor = null; }
+    $('drop').classList.remove('hidden');
+    refresh();
+  }
+
+  function showLogin() {
+    $('login').classList.remove('hidden'); $('drop').classList.add('hidden'); $('app').classList.add('hidden'); $('userbar').classList.add('hidden');
+    $('loginpw').focus();
+  }
+  function doLogin() {
+    var pw = $('loginpw').value;
+    $('loginerr').textContent = '';
+    api('/api/login', { method: 'POST', headers: JSON_H, body: JSON.stringify({ password: pw }) }).then(function (res) {
+      if (res.status === 429) { $('loginerr').textContent = '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.'; return null; }
+      if (!res.ok) { $('loginerr').textContent = '비밀번호가 맞지 않습니다.'; return null; }
+      return res.json().then(function (j) { $('loginpw').value = ''; enterServer(j.role); });
+    }).catch(function () { $('loginerr').textContent = '서버에 연결하지 못했습니다.'; });
+  }
+
+  function enterServer(r) {
+    mode = 'server'; role = r;
+    $('login').classList.add('hidden');
+    $('userbar').classList.remove('hidden');
+    $('who').textContent = (role === 'boss' ? '대표' : '경리') + ' 계정으로 접속 중';
+    $('drop').classList.toggle('hidden', role !== 'accountant');
+    $('reset').textContent = '저장본으로 되돌리기';
+    loadServer();
+  }
+
+  function loadServer() {
+    api('/api/dataset').then(function (res) {
+      if (res.status === 204) { files = []; serverMeta = null; return null; }
+      if (!res.ok) throw new Error('dataset');
+      return res.json();
+    }).then(function (j) {
+      if (j) { files = j.files || []; serverMeta = j.meta || null; }
+      dirty = false;
+      return api('/api/settings').then(function (r) { return r.ok ? r.json() : {}; }).then(function (s) { settings = s && typeof s === 'object' ? s : {}; });
+    }).then(function () { refresh(); }).catch(function () { $('msg').innerHTML = '<div class="callout bad">서버에서 데이터를 불러오지 못했습니다.</div>'; });
+  }
+
+  function logout() {
+    api('/api/logout', { method: 'POST' }).catch(function () { /* 이미 만료 */ }).then(function () { files = []; S = null; curQ = null; role = null; $('answer').innerHTML = ''; $('params').innerHTML = ''; showLogin(); });
+  }
+
+  /* ---------- 업로드 / 저장 ---------- */
   function handleFiles(list) {
     var arr = Array.prototype.slice.call(list);
     Promise.all(arr.map(function (f) {
-      return BM.readWorkbook(f).then(function (r) { r.name = f.name; return r; }, function () { return { name: f.name, kind: null }; });
+      return BM.readWorkbook(f).then(function (r) { r.name = f.name; r.raw = f; return r; }, function () { return { name: f.name, kind: null }; });
     })).then(function (res) {
       var bad = res.filter(function (r) { return !r.kind || !r.data; });
       res.forEach(function (r) {
@@ -23,41 +104,62 @@
         if (r.kind === 'trades' && r.vendors) files.push({ name: r.name + ' (업체마스터)', kind: 'vendors', data: r.vendors });
       });
       $('msg').innerHTML = bad.length ? '<div class="callout warn">읽지 못한 파일: ' + bad.map(function (b) { return esc(b.name); }).join(', ') +
-        '<br>분개장(ERP 내보내기), 거래내역 템플릿, 업체마스터 템플릿 형식만 지원합니다.</div>' : '';
+        '<br>분개장(ERP 내보내기), 거래내역 템플릿, 반입/반출 현황, 업체마스터 템플릿 형식만 지원합니다.</div>' : '';
+      if (res.some(function (r) { return r.kind; })) dirty = true;
       refresh();
     });
   }
 
+  function removeFile(name) {
+    files = files.filter(function (f) { return f.name !== name && f.name !== name + ' (업체마스터)'; });
+    dirty = true; refresh();
+  }
+
+  function saveToServer() {
+    var btn = $('savebtn'); btn.disabled = true; $('saveerr').textContent = '';
+    var payload = { files: files.map(function (f) { return { name: f.name, kind: f.kind, data: f.data }; }) };
+    api('/api/dataset', { method: 'POST', headers: JSON_H, body: JSON.stringify(payload) }).then(function (res) {
+      if (!res.ok) throw new Error(res.status === 413 ? '파일이 너무 큽니다' : '저장 실패(' + res.status + ')');
+      return res.json();
+    }).then(function (j) {
+      serverMeta = j.meta;
+      var raws = files.filter(function (f) { return f.raw && !f.rawSent; });
+      return raws.reduce(function (p, f) {
+        return p.then(function () {
+          return api('/api/upload?name=' + encodeURIComponent(f.raw.name), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f.raw }).then(function (r) { if (r.ok) f.rawSent = true; });
+        });
+      }, Promise.resolve());
+    }).then(function () { dirty = false; btn.disabled = false; renderServerBar(); })
+      .catch(function (e) { btn.disabled = false; $('saveerr').textContent = '저장하지 못했습니다: ' + e.message; });
+  }
+
+  function renderServerBar() {
+    if (mode !== 'server') { $('serverinfo').innerHTML = ''; $('savebar').classList.add('hidden'); return; }
+    var info = serverMeta ? '서버 저장본: ' + esc(new Date(serverMeta.savedAt).toLocaleString('ko-KR')) + ' · ' + (serverMeta.savedBy === 'boss' ? '대표' : '경리') + ' 저장 · 파일 ' + serverMeta.fileCount + '개 (버전 ' + serverMeta.version + ')' : '서버에 저장된 데이터가 없습니다.' + (role === 'boss' ? ' 경리 담당자가 파일을 올려 저장해야 질문할 수 있습니다.' : ' 파일을 올린 뒤 "서버에 저장"을 누르세요.');
+    $('serverinfo').innerHTML = '<div class="asof">' + info + '</div>';
+    $('savebar').classList.toggle('hidden', !(role === 'accountant' && dirty));
+  }
+
+  /* ---------- 화면 갱신 ---------- */
   function refresh() {
     renderChips();
-    var journals = files.filter(function (f) { return f.kind === 'journal'; }).map(function (f) { return f.data; });
-    if (!journals.length) { $('app').classList.add('hidden'); S = null; return; }
-    var tradeFiles = files.filter(function (f) { return f.kind === 'trades'; });
-    var trades = null;
-    if (tradeFiles.length) {
-      trades = { rows: [], flow: tradeFiles[0].data.flow, warn: { badDate: 0, unknownDir: 0 } };
-      tradeFiles.forEach(function (f) { trades.rows = trades.rows.concat(f.data.rows); trades.warn.badDate += f.data.warn.badDate; trades.warn.unknownDir += f.data.warn.unknownDir; });
-    }
-    var vlist = [];
-    files.filter(function (f) { return f.kind === 'vendors'; }).forEach(function (f) { vlist = vlist.concat(f.data.list); });
-    var m = BM.buildModel({ journals: journals, trades: trades, vendors: vlist.length ? { list: vlist } : null });
-    var pl = BM.monthlyPL(m), rc = BM.reconcile(m, pl);
-    S = { m: m, pl: pl, rc: rc, ar: BM.openItems(m, 'AR'), ap: BM.openItems(m, 'AP'), bepMonths: BM.defaultMonths(m, pl, rc) };
-    var keys = {};
-    S.ar.vendors.concat(S.ap.vendors).forEach(function (v) { keys[v.key] = 1; });
-    if (trades) trades.rows.forEach(function (t) { if (t.vk) keys[t.vk] = 1; });
-    m.rows.forEach(function (r) { if (r.vk && (r.cls === 'revenue' || BM.CASH_ACCTS.test(r.acct))) keys[r.vk] = 1; });
-    S.vendorKeys = Object.keys(keys).filter(function (k) { return k && k !== '__none__'; }).sort(function (a, b) { return m.vendorName(a) < m.vendorName(b) ? -1 : 1; });
+    renderServerBar();
+    S = E.build(files);
+    if (!S) { $('app').classList.add('hidden'); return; }
     $('app').classList.remove('hidden');
     renderSummary(); renderQuestionList(); renderTrend();
-    if (curQ) selectQ(curQ.id);
+    if (curQ) selectQ(curQ.id, null, 'refresh');
   }
 
   function renderChips() {
     var cnt = function (k) { return files.filter(function (f) { return f.kind === k; }).length; };
     [['chip-j', 'journal'], ['chip-t', 'trades'], ['chip-v', 'vendors']].forEach(function (p) { $(p[0]).classList.toggle('on', cnt(p[1]) > 0); });
     $('chip-j').textContent = '분개장' + (cnt('journal') ? ' ' + cnt('journal') + '개' : '');
-    $('loaded').innerHTML = files.filter(function (f) { return f.kind !== 'vendors' || f.name.indexOf('(업체마스터)') < 0; }).map(function (f) { return '<span class="file">' + esc(f.name) + '</span>'; }).join('');
+    var canEdit = mode === 'standalone' || role === 'accountant';
+    $('loaded').innerHTML = files.filter(function (f) { return f.kind !== 'vendors' || f.name.indexOf('(업체마스터)') < 0; }).map(function (f) {
+      return '<span class="file">' + esc(f.name) + (canEdit ? ' <button class="x" data-name="' + esc(f.name) + '" title="이 파일 빼기">×</button>' : '') + '</span>';
+    }).join('');
+    Array.prototype.forEach.call($('loaded').querySelectorAll('button.x'), function (b) { b.addEventListener('click', function () { removeFile(b.getAttribute('data-name')); }); });
   }
 
   /* ---------- 요약 ---------- */
@@ -98,42 +200,32 @@
   /* ---------- 질문 ---------- */
   function renderQuestionList() {
     $('qlist').innerHTML = BM.questions.map(function (q) { return '<button class="qchip' + (curQ && curQ.id === q.id ? ' on' : '') + '" data-q="' + q.id + '">' + esc(q.label) + '</button>'; }).join('');
-    Array.prototype.forEach.call($('qlist').querySelectorAll('button'), function (b) { b.addEventListener('click', function () { selectQ(b.getAttribute('data-q')); }); });
+    Array.prototype.forEach.call($('qlist').querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () { $('understood').textContent = ''; selectQ(b.getAttribute('data-q'), null, 'chip'); });
+    });
   }
 
-  function resolveVendor(text) {
-    var t = (text || '').trim();
-    if (!t) return null;
-    var m = S.m, nk = BM.normName(t), hit = null, many = [];
-    S.vendorKeys.forEach(function (k) { if (m.vendorName(k) === t || k === nk) hit = k; });
-    if (hit) return { key: hit };
-    S.vendorKeys.forEach(function (k) { if (nk && (k.indexOf(nk) >= 0 || nk.indexOf(k) >= 0)) many.push(k); });
-    if (many.length) return { key: many[0], many: many };
-    return { key: null };
-  }
-
-  function selectQ(id) {
-    curQ = BM.questions.filter(function (q) { return q.id === id; })[0];
+  /* preset: {vendorText, month, acct} 가 있으면 그 값으로 채우고, 없으면 직전 값을 이어서 쓴다 */
+  function selectQ(id, preset, source) {
+    curQ = E.question(id);
     renderQuestionList();
     var needs = curQ.needs, h = '';
-    var months = S.m.months.slice().reverse();
-    var defM = S.m.asOf.slice(0, 7);
+    var months = S.m.months.slice().reverse(), defM = S.m.asOf.slice(0, 7);
+    if (preset) { lastVendorText = preset.vendorText || ''; lastMonth = preset.month || defM; }
+    if (source === 'chip') logEvent({ type: 'ask', source: 'chip', id: id });
     if (needs.indexOf('vendor') >= 0 || needs.indexOf('vendor?') >= 0) {
-      h += '<label>업체 <input id="p-vendor" list="vlist" placeholder="' + (needs.indexOf('vendor?') >= 0 ? '비워 두면 전체' : '업체명 입력') + '" value="' + esc(curVendorText()) + '"></label>' +
+      h += '<label>업체 <input id="p-vendor" list="vlist" placeholder="' + (needs.indexOf('vendor?') >= 0 ? '비워 두면 전체' : '업체명 입력') + '" value="' + esc(lastVendorText) + '"></label>' +
         '<datalist id="vlist">' + S.vendorKeys.map(function (k) { return '<option value="' + esc(S.m.vendorName(k)) + '">'; }).join('') + '</datalist>';
     }
-    if (needs.indexOf('month') >= 0) h += '<label>월 <select id="p-month">' + months.map(function (x) { return '<option value="' + x + '"' + (x === (curMonth() || defM) ? ' selected' : '') + '>' + BM.ymLabel(x) + '</option>'; }).join('') + '</select></label>';
+    if (needs.indexOf('month') >= 0) h += '<label>월 <select id="p-month">' + months.map(function (x) { return '<option value="' + x + '"' + (x === (lastMonth || defM) ? ' selected' : '') + '>' + BM.ymLabel(x) + '</option>'; }).join('') + '</select></label>';
     if (needs.indexOf('acct') >= 0 || needs.indexOf('acct?') >= 0) h += '<label>비용 항목 <select id="p-acct"></select></label>';
     $('params').innerHTML = h;
-    if ($('p-acct')) fillAcct();
+    if ($('p-acct')) { fillAcct(); if (preset && preset.acct) $('p-acct').value = preset.acct; }
     Array.prototype.forEach.call($('params').querySelectorAll('input,select'), function (el) {
       el.addEventListener('change', function () { if (el.id === 'p-month' && $('p-acct')) fillAcct(); runQ(); });
     });
     runQ();
   }
-  var lastVendorText = '', lastMonth = '';
-  function curVendorText() { return lastVendorText; }
-  function curMonth() { return lastMonth; }
   function fillAcct() {
     var ym = $('p-month').value, e = BM.expenseByAcct(S.m, ym);
     var keys = Object.keys(e).sort(function (a, b) { return e[b].amt - e[a].amt; });
@@ -143,40 +235,43 @@
   }
 
   function runQ() {
-    var needs = curQ.needs, c = { m: S.m, pl: S.pl, ar: S.ar, ap: S.ap, rc: S.rc, bepMonths: S.bepMonths };
-    var notes = [];
-    if ($('p-month')) { c.month = $('p-month').value; lastMonth = c.month; }
-    if ($('p-acct')) c.acct = $('p-acct').value;
-    if ($('p-vendor')) {
-      lastVendorText = $('p-vendor').value;
-      var rv = resolveVendor(lastVendorText);
-      if (rv && rv.key) {
-        c.vk = rv.key; c.vname = S.m.vendorName(rv.key);
-        if (rv.many && rv.many.length > 1) notes.push('비슷한 이름이 여러 개입니다: ' + rv.many.slice(0, 5).map(function (k) { return S.m.vendorName(k); }).join(', ') + ' — 첫 번째로 이해했습니다.');
-      } else if (rv) { $('answer').innerHTML = '<div class="callout warn">"' + esc(lastVendorText) + '"과(와) 일치하는 업체를 찾지 못했습니다.</div>'; return; }
-      else if (needs.indexOf('vendor') >= 0) { $('answer').innerHTML = '<div class="hint">업체를 입력하거나 목록에서 고르세요.</div>'; return; }
-    }
-    try { c.anchor = JSON.parse(localStorage.getItem('bm-cash-anchor') || 'null'); } catch (e) { c.anchor = null; }
-    var a;
-    try { a = curQ.run(c); } catch (e) { $('answer').innerHTML = '<div class="callout bad">이 질문을 계산하는 중 오류가 났습니다: ' + esc(e.message) + '</div>'; return; }
-    var allNotes = (a.notes || []).concat(notes);
-    var meta = metaFor(curQ.id, c, a);
-    $('answer').innerHTML = '<div class="card ans">' + meta + '<div class="headline">' + esc(a.headline) + '</div>' + (a.body || '') +
-      (allNotes.length ? '<ul class="notes">' + allNotes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
-    if (a.after) a.after($('answer'), runQ);
+    var p = {};
+    if ($('p-month')) { p.month = $('p-month').value; lastMonth = p.month; }
+    if ($('p-acct')) p.acct = $('p-acct').value;
+    if ($('p-vendor')) { lastVendorText = $('p-vendor').value; p.vendorText = lastVendorText; }
+    var res;
+    try { res = E.run(S, curQ.id, p, { useEst: useEst, anchor: settings.anchor, canEditAnchor: mode === 'standalone' || role === 'accountant' }); }
+    catch (e) { $('answer').innerHTML = '<div class="callout bad">이 질문을 계산하는 중 오류가 났습니다: ' + esc(e.message) + '</div>'; return; }
+    if (res.error === 'vendor-required') { $('answer').innerHTML = '<div class="hint">업체를 입력하거나 목록에서 고르세요.</div>'; return; }
+    if (res.error === 'acct-required') { $('answer').innerHTML = '<div class="hint">비용 항목을 고르세요.</div>'; return; }
+    if (res.error === 'vendor-not-found') { $('answer').innerHTML = '<div class="callout warn">"' + esc(res.text) + '"과(와) 일치하는 업체를 찾지 못했습니다.</div>'; return; }
+    if (res.error) { $('answer').innerHTML = '<div class="callout bad">질문을 처리하지 못했습니다.</div>'; return; }
+    var cls = res.status === '확정' ? 'fixed' : res.status === '잠정' ? 'prov' : 'est';
+    var meta = '<div class="meta"><span class="st ' + cls + '">' + res.status + '</span> 기준일 ' + esc(res.asOf) + ' · 근거: ' + esc(res.source) +
+      (res.warnings.length ? '<div class="metawarn">데이터 경고: ' + res.warnings.map(esc).join(' / ') + '</div>' : '') + '</div>';
+    $('answer').innerHTML = '<div class="card ans">' + meta + '<div class="headline">' + esc(res.answer.headline) + '</div>' + (res.answer.body || '') +
+      (res.notes.length ? '<ul class="notes">' + res.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+    if (res.answer.after) res.answer.after($('answer'), runQ);
   }
 
-  /* 모든 답변에 기준일, 확정·잠정·추정 구분, 근거를 붙인다 */
-  var BASE_STATUS = { q1: '추정', q2: '잠정', q3: '추정', q4: '확정', q5: '확정', q6: '잠정', q7: '확정', q8: '추정', q9: '추정', q10: '확정', q11: '확정' };
-  var BASE_SRC = { q1: '분개장(미지급금) + 결제 이력', q2: '분개장(보통예금)', q3: '분개장(채권·채무) + 결제 이력', q4: '분개장', q5: '분개장', q6: '분개장', q7: '분개장', q8: '분개장 + 거래내역', q9: '분개장(보통예금) + 입력한 기준 잔액', q10: '거래내역 + 분개장', q11: '거래내역' };
-  function metaFor(id, c, a) {
-    var st = a.status || BASE_STATUS[id] || '잠정';
-    var b = c.month ? S.pl.filter(function (x) { return x.ym === c.month; })[0] : null;
-    if (b && st === '확정' && b.flags.some(function (f) { return f.k === 'partial' || f.k === 'drop'; })) st = '잠정';
-    var cls = st === '확정' ? 'fixed' : st === '잠정' ? 'prov' : 'est';
-    var bad = S.rc.warnings.filter(function (w) { return w.lvl === 'bad'; }).slice(0, 2);
-    return '<div class="meta"><span class="st ' + cls + '">' + st + '</span> 기준일 ' + S.m.asOf + ' · 근거: ' + esc(BASE_SRC[id] || '분개장') +
-      (bad.length ? '<div class="metawarn">데이터 경고: ' + bad.map(function (w) { return esc(w.t); }).join(' / ') + '</div>' : '') + '</div>';
+  /* 자연어 질문: 문장에서 질문 종류·업체·월·항목을 뽑아 같은 질문 화면으로 연결한다 */
+  function ask(text) {
+    text = text.trim();
+    if (!text || !S) return;
+    var r = BM.nl.parse(text, E.nlContext(S));
+    if (!r) {
+      $('understood').textContent = '';
+      $('answer').innerHTML = '<div class="callout warn">질문을 이해하지 못했습니다. 아래 질문 중에서 고르거나, 업체명과 월을 넣어 다시 물어보세요. (예: "○○환경 이번 달 줄 돈 얼마야?")</div>';
+      logEvent({ type: 'ask', source: 'nl', id: null, text: text.slice(0, 200) });
+      return;
+    }
+    var q = E.question(r.id), parts = [q.label];
+    if (r.vendor) parts.push('업체: ' + r.vendor.name);
+    if (r.month) parts.push('월: ' + BM.ymLabel(r.month));
+    if (r.acct) parts.push('항목: ' + r.acct);
+    $('understood').textContent = '이렇게 이해했습니다 → ' + parts.join(' · ') + ' (틀리면 아래에서 바꾸세요)';
+    logEvent({ type: 'ask', source: 'nl', id: r.id, text: text.slice(0, 200) });
+    selectQ(r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct }, 'nl');
   }
 
   /* ---------- 월별 추이 ---------- */
@@ -206,10 +301,18 @@
   /* ---------- 이벤트 ---------- */
   $('pick').addEventListener('click', function () { $('file').click(); });
   $('file').addEventListener('change', function (e) { handleFiles(e.target.files); e.target.value = ''; });
-  $('reset').addEventListener('click', function () { files = []; curQ = null; $('answer').innerHTML = ''; $('params').innerHTML = ''; refresh(); });
+  $('reset').addEventListener('click', function () {
+    if (mode === 'server') { loadServer(); return; }
+    files = []; curQ = null; $('answer').innerHTML = ''; $('params').innerHTML = ''; $('understood').textContent = ''; refresh();
+  });
+  $('askform').addEventListener('submit', function (e) { e.preventDefault(); ask($('askq').value); });
+  $('loginform').addEventListener('submit', function (e) { e.preventDefault(); doLogin(); });
+  $('logout').addEventListener('click', logout);
+  $('savebtn').addEventListener('click', saveToServer);
   var drop = $('drop');
   ['dragenter', 'dragover'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
   ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
   drop.addEventListener('drop', function (e) { handleFiles(e.dataTransfer.files); });
   if (g.matchMedia) g.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { if (S) renderTrend(); });
+  boot();
 })(typeof window !== 'undefined' ? window : globalThis);

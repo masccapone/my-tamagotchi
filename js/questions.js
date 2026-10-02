@@ -217,15 +217,18 @@
     } else {
       head = '기준 잔액이 없어 현재 잔액은 계산하지 못했습니다. 분개장 기간 중 보통예금 증감은 ' + BM.won(BM.sum(rows, function (x) { return x.dr - x.cr; })) + '입니다.';
     }
-    body = '<div class="row"><label>기준일 <input type="date" id="anchor-date" value="' + esc(anchor ? anchor.date : '') + '"></label><label>잔액(원) <input type="text" id="anchor-amt" value="' + esc(anchor && isFinite(anchor.amt) ? anchor.amt : '') + '" placeholder="예: 350000000"></label><button class="btn small" id="anchor-save">저장</button></div>' +
+    var edit = c.canEditAnchor !== false;
+    body = (edit ? '<div class="row"><label>기준일 <input type="date" id="anchor-date" value="' + esc(anchor ? anchor.date : '') + '"></label><label>잔액(원) <input type="text" id="anchor-amt" value="' + esc(anchor && isFinite(anchor.amt) ? anchor.amt : '') + '" placeholder="예: 350000000"></label><button class="btn small" id="anchor-save">저장</button></div>' : '<div class="hint">기준 잔액은 경리 담당자가 입력합니다.</div>') +
       '<h4>계좌별 증감</h4>' + tbl(['계좌', '분개장 기간 증감'], Object.keys(by).map(function (k) { return [esc(k), BM.won(by[k])]; }), [1]);
     return { headline: head, body: body, notes: notes, after: function (root, rerun) {
       var btn = root.querySelector('#anchor-save');
       if (!btn) return;
       btn.addEventListener('click', function () {
         var d = root.querySelector('#anchor-date').value, a = BM.num(root.querySelector('#anchor-amt').value);
-        try { localStorage.setItem('bm-cash-anchor', JSON.stringify({ date: d, amt: a })); } catch (e) { /* 저장 불가 시 이번 화면에서만 사용 */ }
-        c.anchor = { date: d, amt: a }; rerun();
+        var val = { date: d, amt: a };
+        if (BM.saveAnchor) BM.saveAnchor(val);
+        else { try { localStorage.setItem('bm-cash-anchor', JSON.stringify(val)); } catch (e) { /* 저장 불가 시 이번 화면에서만 사용 */ } }
+        c.anchor = val; rerun();
       });
     } };
   } });
