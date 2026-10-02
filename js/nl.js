@@ -63,7 +63,7 @@
     (ctx.vendors || []).forEach(function (v) { if (v.key && v.key.length >= 3 && nq.indexOf(v.key) >= 0) out.push(v); });
     return out.filter(function (v, i) { return !out.some(function (w, j) { return j !== i && w.key !== v.key && w.key.indexOf(v.key) >= 0; }); });
   }
-  var ACCT_ALIAS = { '전기세': '전력비', '전기료': '전력비', '전기요금': '전력비', '월세': '지급임차료', '임차료': '지급임차료', '세금': '세금과공과금', '인건비': '급여', '수수료': '지급수수료', '유류비': '차량유지비', '기름값': '차량유지비', '수리비': '수선비', '소모품': '소모품비', '식대': '복리후생비', '통신료': '통신비', '보험': '보험료', '접대': '접대비', '운임': '운반비', '물류비': '운반비', '이자': '이자비용' };
+  var ACCT_ALIAS = { '전기세': '전력비', '전기료': '전력비', '전기요금': '전력비', '월세': '지급임차료', '임차료': '지급임차료', '세금': '세금과공과금', '인건비': '인건비', '급여': '인건비', '월급': '인건비', '임금': '인건비', '수수료': '지급수수료', '유류비': '차량유지비', '기름값': '차량유지비', '수리비': '수선비', '소모품': '소모품비', '식대': '복리후생비', '통신료': '통신비', '보험': '보험료', '접대': '접대비', '운임': '운반비', '물류비': '운반비', '이자': '이자비용' };
   function findAcct(text, ctx) {
     var al = Object.keys(ACCT_ALIAS).filter(function (k) { return text.indexOf(k) >= 0; }).sort(function (a, b) { return b.length - a.length; })[0];
     if (al) { var target = (ctx.accts || []).filter(function (a) { return a.indexOf(ACCT_ALIAS[al]) === 0; })[0]; if (target) return target; }

@@ -44,7 +44,7 @@
   E.nlContext = function (S) {
     var accts = {};
     S.m.months.slice(-14).forEach(function (ym) { Object.keys(BM.expenseByAcct(S.m, ym)).forEach(function (k) { accts[k] = 1; }); });
-    return { vendors: S.vendorKeys.map(function (k) { return { key: k, name: S.m.vendorName(k) }; }), accts: Object.keys(accts), asOf: S.m.asOf, months: S.m.months };
+    return { vendors: S.vendorKeys.map(function (k) { return { key: k, name: S.m.vendorName(k) }; }), accts: Object.keys(accts).concat(Object.keys(BM.ACCT_GROUPS)), asOf: S.m.asOf, months: S.m.months };
   };
 
   /* 질문마다 필요한 자료가 올라와 있는지 */
@@ -84,7 +84,18 @@
       } else if (rv) return { error: 'vendor-not-found', q: q, text: p.vendorText };
       else if (needs.indexOf('vendor') >= 0) return { error: 'vendor-required', q: q };
     }
-    var a = q.run(c);
+    var PERIOD = ['q2', 'q4', 'q5', 'q6', 'q7', 'q11', 'q14', 'q15', 'q16'];
+    var a;
+    if (c.month && PERIOD.indexOf(qid) >= 0 && S.m.months.indexOf(c.month) < 0) {
+      var last = S.m.months[S.m.months.length - 1];
+      a = { headline: BM.ymLabel(c.month) + '은 분개장에 입력된 전표가 없습니다. 0원이 아니라 자료가 없는 것입니다. 분개장의 마지막 달은 ' + BM.ymLabel(last) + '입니다.', body: '', notes: ['경리 담당자가 해당 월 분개장을 올린 뒤 다시 물어보세요.'], status: '잠정' };
+    } else {
+      a = q.run(c);
+      var day = +S.m.asOf.slice(8);
+      if (c.month && PERIOD.indexOf(qid) >= 0 && c.month === S.m.asOf.slice(0, 7) && day < 25) {
+        a.headline = '※ ' + BM.ymLabel(c.month) + '은 ' + day + '일까지만 입력된 진행 중인 달이라 금액이 적게 나옵니다. ' + a.headline;
+      }
+    }
     var st = a.status || BASE_STATUS[qid] || '잠정';
     var b = c.month ? S.pl.filter(function (x) { return x.ym === c.month; })[0] : null;
     if (b && st === '확정' && b.flags.some(function (f) { return f.k === 'partial' || f.k === 'drop'; })) st = '잠정';

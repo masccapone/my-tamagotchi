@@ -450,6 +450,16 @@
     return ok.slice(-6);
   };
 
+  /* 계정 묶음: 대표가 말하는 "인건비"는 계정 하나가 아니라 급여 계열 여러 계정이다. */
+  BM.ACCT_GROUPS = { '인건비': { re: /^(급여|임원급여|직원급여|상여금|퇴직급여|잡급|임금)$/, note: '급여 계열 계정(급여·임원급여·직원급여·상여금·퇴직급여·잡급·임금)의 합입니다. 복리후생비와 4대보험료(보험료 계정)는 포함하지 않았습니다.' } };
+  BM.acctStrip = function (a) { return a.replace(/\((제|도|분|판)\)$/, ''); };
+  BM.acctIs = function (name, acct) { var g = BM.ACCT_GROUPS[acct], b = BM.acctStrip(name); return g ? g.re.test(b) : b === acct; };
+  BM.expenseOne = function (m, ym, acct) {
+    var e = BM.expenseByAcct(m, ym), g = BM.ACCT_GROUPS[acct];
+    if (!g) return e[acct] ? e[acct].amt : 0;
+    return BM.sum(Object.keys(e).filter(function (k) { return g.re.test(k); }), function (k) { return e[k].amt; });
+  };
+
   /* 비용 분석(4, 5, 7번): 계정/업체별 */
   BM.expenseByAcct = function (m, ym) {
     var acc = BM.accountMonthly(m), o = {};

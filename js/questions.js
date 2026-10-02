@@ -88,16 +88,19 @@
   /* 4. 이 비용은 뭐야 */
   Q.push({ id: 'q4', label: '[비용 항목]의 [월] 내역(거래처·적요·금액)은?', needs: ['month', 'acct'], run: function (c) {
     var rows = c.m.rows.filter(function (x) {
-      return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.dr === 0 && x.cr !== 0);
+      return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && BM.acctIs(x.acct, c.acct) && !(x.closing && x.dr === 0 && x.cr !== 0);
     });
     if (!rows.length) return { headline: BM.ymLabel(c.month) + ' ' + c.acct + ' 내역이 없습니다.', body: '', notes: [] };
     var tot = BM.sum(rows, function (x) { return x.dr - x.cr; });
     var by = {}; rows.forEach(function (x) { var k = x.vk || '(거래처 없음)'; by[k] = (by[k] || 0) + x.dr - x.cr; });
     var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 3).map(function (k) { return (k === '(거래처 없음)' ? k : c.m.vendorName(k)) + ' ' + BM.won(by[k]); });
     var sorted = rows.slice().sort(function (a, b) { return Math.abs(b.dr - b.cr) - Math.abs(a.dr - a.cr); }).slice(0, 15);
-    return { headline: BM.ymLabel(c.month) + ' ' + c.acct + ': 합계 ' + BM.won(tot) + ' (' + rows.length + '건). 큰 거래처: ' + top.join(', ') + '.',
+    var grp = BM.ACCT_GROUPS[c.acct], parts = {};
+    if (grp) { rows.forEach(function (x) { parts[x.acct] = (parts[x.acct] || 0) + x.dr - x.cr; }); }
+    var partTxt = grp ? ' 구성: ' + Object.keys(parts).sort(function (a, b) { return parts[b] - parts[a]; }).map(function (k) { return k + ' ' + BM.won(parts[k]); }).join(', ') + '.' : '';
+    return { headline: BM.ymLabel(c.month) + ' ' + c.acct + ': 합계 ' + BM.won(tot) + ' (' + rows.length + '건).' + partTxt + (grp ? '' : ' 큰 거래처: ' + top.join(', ') + '.'),
       body: tbl(['일자', '거래처', '적요', '금액'], sorted.map(function (x) { return [x.date, esc(c.m.vendorName(x.vk)), esc(short(x.memo, 50)), BM.won(x.dr - x.cr)]; }), [3]),
-      notes: ['금액이 큰 순서로 최대 15건입니다. 계정과목·거래처·적요는 전표 입력 내용 그대로입니다.'] };
+      notes: ['금액이 큰 순서로 최대 15건입니다. 계정과목·거래처·적요는 전표 입력 내용 그대로입니다.'].concat(grp ? [grp.note] : []) };
   } });
 
   /* 5. 이번 달 왜 이렇게 많이 나갔어 */
@@ -106,10 +109,10 @@
     if (!prev.length) return { headline: '비교할 이전 달 데이터가 없습니다.', body: '', notes: [] };
     var lumpy = /감가상각|퇴직|충당/;
     if (c.acct) {
-      var series = c.m.months.slice(Math.max(0, idx - 5), idx + 1).map(function (ym) { var e = BM.expenseByAcct(c.m, ym)[c.acct]; return { ym: ym, a: e ? e.amt : 0 }; });
+      var series = c.m.months.slice(Math.max(0, idx - 5), idx + 1).map(function (ym) { return { ym: ym, a: BM.expenseOne(c.m, ym, c.acct) }; });
       var cur = series[series.length - 1].a, bs = series.slice(0, -1).filter(function (x) { return prev.indexOf(x.ym) >= 0; });
       var avg = bs.length ? BM.sum(bs, function (x) { return x.a; }) / bs.length : 0;
-      var rows = c.m.rows.filter(function (x) { return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.dr === 0 && x.cr !== 0); })
+      var rows = c.m.rows.filter(function (x) { return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && BM.acctIs(x.acct, c.acct) && !(x.closing && x.dr === 0 && x.cr !== 0); })
         .sort(function (a, b) { return Math.abs(b.dr - b.cr) - Math.abs(a.dr - a.cr); }).slice(0, 8);
       return { headline: c.acct + ': ' + BM.ymLabel(c.month) + ' ' + BM.won(cur) + '으로 직전 ' + bs.length + '개월 평균(' + BM.won(avg) + ')보다 ' + BM.won(Math.abs(cur - avg)) + (cur >= avg ? ' 많습니다.' : ' 적습니다.'),
         body: '<h4>월별 추이</h4>' + tbl(['월', '금액'], series.map(function (x) { return [BM.ymLabel(x.ym), BM.won(x.a)]; }), [1]) +
