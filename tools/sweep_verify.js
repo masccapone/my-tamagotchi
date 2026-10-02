@@ -81,6 +81,15 @@ const revenueOf = ym => sum(rows.filter(r => r.ym === ym && /^4/.test(r.code) &&
   check('손익계산서 누계 세전이익(q20)', '2026-01~09', hasNum(h, pre, 1), h.slice(0, 80));
   yms.forEach(ym => { const h1 = head(run('q20', { month: ym, from: ym })); check('손익계산서 월별 매출(q20)', ym, hasNum(h1, revenueOf(ym), 1), h1.slice(0, 60)); });
 }
+// 4d) 이익률(q21): 결산 완료 분기(2026년 2분기) 매출총이익률을 계정코드·이름으로 독립 계산
+{
+  const yms = ['2026-04', '2026-05', '2026-06'];
+  const rev = sum(yms, ym => revenueOf(ym)), cogs = sum(rows.filter(r => yms.includes(r.ym) && /매출원가/.test(r.acct)), r => r.dr - r.cr);
+  const pre = sum(yms, ym => S.pl.filter(b => b.ym === ym)[0].plBook);
+  const h = head(run('q21', { month: '2026-06', from: '2026-04' }));
+  check('매출총이익률(q21)', '2026Q2', h.includes(((rev - cogs) / rev * 100).toFixed(1) + '%'), h.slice(0, 90));
+  check('세전이익률(q21)', '2026Q2', h.includes((pre / rev * 100).toFixed(1) + '%'), h.slice(0, 90));
+}
 // 5) 전체 합계 일관성
 { const tot = sum(arV, v => Math.max(0, arNet(v))), h = head(run('q12', {})); check('미수금 전체 합계(q12)', '전체', hasNum(h, tot, 1), h.slice(0, 70)); }
 console.log('전수 검증 결과 (독립 계산 값이 답변 제목에 그대로 나오는지)\n');
