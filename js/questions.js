@@ -242,7 +242,8 @@
     keys.forEach(function (k) {
       var o = up[k], s = o.series.slice(-6);
       var cur = o.latest;
-      lines.push((o.flow === '매출' ? '받는 ' : '주는 ') + o.kind + ' ' + BM.fmtN(cur.avg, 1) + '원/' + (o.unit || '단위') + (o.changed ? ' (최근 변동)' : ''));
+      var pv = o.series.length > 1 ? o.series[o.series.length - 2] : null;
+      lines.push((o.flow === '매출' ? '받는 ' : '주는 ') + o.kind + ' ' + BM.fmtN(cur.avg, 1) + '원/' + (o.unit || '단위') + (o.changed && pv ? ' (' + (+cur.ym.slice(5)) + '월에 변동: ' + (+pv.ym.slice(5)) + '월 ' + BM.fmtN(pv.avg, 1) + '원 → ' + (+cur.ym.slice(5)) + '월 ' + BM.fmtN(cur.avg, 1) + '원)' : ''));
       rows.push([o.flow === '매출' ? '받는 단가' : '주는 단가', esc(o.kind), s.map(function (x) { return (+x.ym.slice(5)) + '월 ' + BM.fmtN(x.avg, 1); }).join(' → '), o.changed ? '<span class="badge warn">변동</span>' : '변동 없음']);
     });
     // 거래내역(청구처 기준) vs 분개장 매출
@@ -290,6 +291,145 @@
     var hist = c.m.months.slice(Math.max(0, idx - 5), idx + 1).map(function (ym) { var x = BM.volumes(c.m, c.vk, ym); return [BM.ymLabel(ym), ton(x.inKg), ton(x.outKg), x.n]; });
     return { headline: c.vname + ' ' + BM.ymLabel(c.month) + ' 반입 ' + ton(v.inKg) + ' (' + v.n + '건)' + (prev && prev.inKg ? ', 전월 ' + ton(prev.inKg) + ' 대비 ' + ((v.inKg / prev.inKg - 1) * 100).toFixed(0) + '%' : '') + '.',
       body: tbl(['월', '반입', '반출', '건수'], hist, [1, 2, 3]), notes: [] };
+  } });
+
+  /* ---------- 조회형 질문: 항목 × 업체 × 기간으로 묻는 질문 ---------- */
+  function sumBy(a, f) { return a.reduce(function (s, x) { return s + f(x); }, 0); }
+  function agingTable(vendors) {
+    return tbl(['업체', '잔액', '30일 이내', '31~60일', '61~90일', '91~180일', '180일 초과'], vendors.map(function (v) {
+      var b = [0, 0, 0, 0, 0];
+      v.lots.forEach(function (l) { var i = l.age <= 30 ? 0 : l.age <= 60 ? 1 : l.age <= 90 ? 2 : l.age <= 180 ? 3 : 4; b[i] += l.amt; });
+      return [esc(v.name), BM.won(v.open)].concat(b.map(function (x) { return x ? BM.won(x) : '-'; }));
+    }), [1, 2, 3, 4, 5, 6]);
+  }
+  function lotsTable(v) {
+    return tbl(['청구일', '적요', '금액', '경과일', '예상 지급·입금일'], v.lots.map(function (l) { return [l.iso, esc(short(l.memo, 40)), BM.won(l.amt), l.age + '일', l.expIso]; }), [2, 3]);
+  }
+  function negativeNote(items) {
+    var bad = items.vendors.filter(function (x) { return x.opening; });
+    return bad.length ? [bad.length + '곳은 이전 연도 기초 잔액이 분개장에 없어 잔액이 마이너스이므로 합계에서 뺐습니다: ' + bad.slice(0, 3).map(function (x) { return x.name; }).join(', ') + (bad.length > 3 ? ' 등' : '')] : [];
+  }
+
+  /* 12. 미수금(받을 돈) 잔액, 연령 */
+  Q.push({ id: 'q12', label: '미수금(받을 돈)이 얼마야?', needs: ['vendor?', 'days?', 'topn?'], run: function (c) {
+    var days = c.days || null, topN = c.topN || 5, asOf = c.m.asOf;
+    if (c.vk) {
+      var v = c.ar.vendors.filter(function (x) { return x.key === c.vk; })[0];
+      if (!v || v.open <= 0) return { headline: c.vname + '의 미수금은 없습니다 (' + asOf + ' 분개장 기준).', body: '', notes: [] };
+      var over = days ? sumBy(v.lots.filter(function (l) { return l.age > days; }), function (l) { return l.amt; }) : 0;
+      var oldest = Math.max.apply(null, v.lots.map(function (l) { return l.age; }));
+      var head = days ? (over > 0 ? c.vname + ': ' + days + '일 넘게 못 받은 돈 ' + BM.won(over) + ' (전체 미수금 잔액 ' + BM.won(v.open) + ').' : c.vname + ': ' + days + '일 넘은 미수금은 없습니다. 전체 미수금 잔액 ' + BM.won(v.open) + ' (가장 오래된 청구 ' + oldest + '일 경과).')
+        : c.vname + ' 미수금 잔액 ' + BM.won(v.open) + ' (' + v.lots.length + '건, 가장 오래된 청구 ' + oldest + '일 경과).';
+      return { headline: head, body: lotsTable(v), notes: ['청구일은 매출 전표일 기준이고 선입선출로 입금을 맞춘 값입니다. 예상 입금일은 "' + v.paySrc + '" 기준 추정입니다.'] };
+    }
+    var list = c.ar.vendors.filter(function (x) { return x.open > 0; });
+    var scoped = days ? list.map(function (x) { return { v: x, amt: sumBy(x.lots.filter(function (l) { return l.age > days; }), function (l) { return l.amt; }) }; }).filter(function (x) { return x.amt > 0; })
+      : list.map(function (x) { return { v: x, amt: x.open }; });
+    scoped.sort(function (a, b) { return b.amt - a.amt; });
+    var total = sumBy(scoped, function (x) { return x.amt; });
+    var tops = scoped.slice(0, topN);
+    if (days && !scoped.length) return { headline: days + '일 넘게 못 받은 돈은 없습니다 (전체 미수금 잔액 ' + BM.won(sumBy(list, function (x) { return x.open; })) + ').', body: agingTable(list.slice(0, topN)), notes: negativeNote(c.ar) };
+    return { headline: (days ? days + '일 넘게 못 받은 돈 ' + BM.won(total) + ' (' + scoped.length + '개 업체)' : '미수금 잔액 합계 ' + BM.won(total) + ' (' + scoped.length + '개 업체)') + '. 큰 곳: ' + tops.slice(0, c.topN ? Math.min(c.topN, 8) : 3).map(function (x) { return x.v.name + ' ' + BM.won(x.amt); }).join(', ') + '.',
+      body: (days ? '' : '') + agingTable(tops.map(function (x) { return x.v; })), notes: negativeNote(c.ar).concat(['청구일은 매출 전표일 기준이고 선입선출로 입금을 맞춘 값입니다.']) };
+  } });
+
+  /* 13. 미지급금(줄 돈) 잔액, 마이너스 잔액 점검 */
+  Q.push({ id: 'q13', label: '미지급금(줄 돈)이 얼마야?', needs: ['vendor?', 'topn?'], run: function (c) {
+    var topN = c.topN || 5, ap = c.ap, asOf = c.m.asOf, ym = asOf.slice(0, 7), r = monthRange(ym);
+    function split(v) { var d = 0, o = 0; v.lots.forEach(function (l) { if (l.expT < r.s) o += l.amt; else if (l.expT <= r.e) d += l.amt; }); return { due: d, over: o }; }
+    if (c.view === 'negative') {
+      var bad = ap.vendors.filter(function (x) { return x.opening; }).sort(function (a, b) { return a.balance - b.balance; });
+      if (!bad.length) return { headline: '미지급금이 마이너스인 업체는 없습니다.', body: '', notes: [] };
+      return { headline: '미지급금이 마이너스인 업체 ' + bad.length + '곳: ' + bad.slice(0, 5).map(function (x) { return x.name + ' ' + BM.won(x.balance); }).join(', ') + '.',
+        body: tbl(['업체', '미지급금 잔액'], bad.map(function (x) { return [esc(x.name), BM.won(x.balance)]; }), [1]),
+        notes: ['이전 연도에 발생한 채무를 올해 갚아서, 발생 전표가 이 분개장에 없을 때 생깁니다. 기초 잔액이 있어야 정확한 잔액을 알 수 있습니다.'] };
+    }
+    if (c.vk) {
+      var v = ap.vendors.filter(function (x) { return x.key === c.vk; })[0];
+      if (!v || v.open <= 0) return { headline: c.vname + '에 줄 미지급금은 없습니다 (' + asOf + ' 분개장 기준).' + (v && v.opening ? ' (이전 연도 기초 잔액이 없어 잔액이 마이너스입니다)' : ''), body: '', notes: [] };
+      var sp = split(v);
+      return { headline: c.vname + ' 미지급금 잔액 ' + BM.won(v.open) + ' (' + v.lots.length + '건). ' + BM.ymLabel(ym) + ' 도래 추정 ' + BM.won(sp.due) + ', 이미 기한이 지난 추정 ' + BM.won(sp.over) + '.', body: lotsTable(v),
+        notes: ['예정일은 "' + v.paySrc + '" 기준 추정이며 실제 지급 결정과 다를 수 있습니다.'] };
+    }
+    var list = ap.vendors.filter(function (x) { return x.open > 0; }).sort(function (a, b) { return b.open - a.open; });
+    var total = sumBy(list, function (x) { return x.open; }), due = 0, over = 0;
+    list.forEach(function (x) { var s = split(x); due += s.due; over += s.over; });
+    return { headline: '미지급금 잔액 합계 ' + BM.won(total) + ' (' + list.length + '개 거래처). 이 중 ' + BM.ymLabel(ym) + ' 도래 추정 ' + BM.won(due) + ', 이미 기한이 지난 추정 ' + BM.won(over) + '. 큰 곳: ' + list.slice(0, 3).map(function (x) { return x.name + ' ' + BM.won(x.open); }).join(', ') + '.',
+      body: tbl(['업체', '잔액', BM.ymLabel(ym) + ' 도래(추정)', '기한 경과(추정)', '예상 근거'], list.slice(0, topN).map(function (x) { var s = split(x); return [esc(x.name), BM.won(x.open), BM.won(s.due), BM.won(s.over), esc(x.paySrc)]; }), [1, 2, 3]),
+      notes: ['예정일은 업체마스터 결제기한 또는 과거 결제 이력으로 추정한 값이라 실제 지급 결정과 다를 수 있습니다.', '미지급금에는 카드대금·4대보험 등 거래처가 아닌 항목도 포함됩니다.'].concat(negativeNote(ap)) };
+  } });
+
+  /* 14. 매출 조회 */
+  Q.push({ id: 'q14', label: '이 달 매출이 얼마야?', needs: ['vendor?', 'month'], run: function (c) {
+    var b = c.pl.filter(function (x) { return x.ym === c.month; })[0];
+    if (!b) return { headline: '해당 월 데이터가 없습니다.', body: '', notes: [] };
+    var idx = c.pl.indexOf(b), prev = idx > 0 ? c.pl[idx - 1] : null, notes = [];
+    var trade = c.m.trades ? sumBy(c.m.trades.rows.filter(function (t) { return t.ym === c.month && t.flow === '매출' && (!c.vk || t.bk === c.vk); }), function (t) { return t.amt; }) : null;
+    var rows = c.m.rows.filter(function (x) { return x.ym === c.month && x.cls === 'revenue' && (!c.vk || x.vk === c.vk); });
+    var total = c.vk ? sumBy(rows, function (x) { return x.cr - x.dr; }) : b.rev;
+    var by = {}; rows.forEach(function (x) { by[x.acct] = (by[x.acct] || 0) + x.cr - x.dr; });
+    var head = BM.ymLabel(c.month) + (c.vk ? ' ' + c.vname : '') + ' 매출(분개장 기준) ' + BM.won(total) + (!c.vk && prev && prev.rev > 0 ? ' (전월 ' + BM.won(prev.rev) + ' 대비 ' + ((total / prev.rev - 1) * 100).toFixed(0) + '%)' : '') + '.' + (trade != null ? ' 거래내역 기준은 ' + BM.won(trade) + '입니다.' : '');
+    if (trade != null && total > 0 && Math.abs(trade - total) > Math.max(0.05 * trade, 1e7)) notes.push('거래내역과 분개장 매출이 ' + BM.won(Math.abs(trade - total)) + ' 차이납니다. ' + (trade > total ? '분개장에 매출이 덜 입력됐을 수 있습니다.' : '거래내역에 누락이 있을 수 있습니다.'));
+    b.flags.forEach(function (f) { if (f.k === 'drop') notes.push('이 달 매출이 다른 달보다 매우 적어 미입력일 수 있습니다.'); if (f.k === 'partial') notes.push('아직 진행 중인 달입니다.'); });
+    var byV = {}; if (!c.vk) rows.forEach(function (x) { var k = x.vk || '(거래처 없음)'; byV[k] = (byV[k] || 0) + x.cr - x.dr; });
+    var vList = Object.keys(byV).sort(function (a, b2) { return byV[b2] - byV[a]; }).slice(0, 8);
+    return { headline: head, body: tbl(['계정', '금액'], Object.keys(by).map(function (k) { return [esc(k), BM.won(by[k])]; }), [1]) + (vList.length ? '<h4>업체별 상위</h4>' + tbl(['업체', '매출'], vList.map(function (k) { return [esc(k === '(거래처 없음)' ? k : c.m.vendorName(k)), BM.won(byV[k])]; }), [1]) : ''), notes: notes };
+  } });
+
+  /* 15. 비용 합계와 큰 항목 */
+  Q.push({ id: 'q15', label: '이 달 비용이 얼마야? 큰 항목은?', needs: ['month'], run: function (c) {
+    var e = BM.expenseByAcct(c.m, c.month), keys = Object.keys(e).sort(function (a, b) { return e[b].amt - e[a].amt; });
+    if (!keys.length) return { headline: '해당 월 비용 내역이 없습니다.', body: '', notes: [] };
+    var total = sumBy(keys, function (k) { return e[k].amt; });
+    return { headline: BM.ymLabel(c.month) + ' 발생비용 합계 ' + BM.won(total) + '. 가장 큰 항목은 ' + keys.slice(0, 3).map(function (k) { return k + ' ' + BM.won(e[k].amt); }).join(', ') + ' 순입니다.',
+      body: tbl(['항목', '금액', '비중'], keys.slice(0, 10).map(function (k) { return [esc(k), BM.won(e[k].amt), (e[k].amt / total * 100).toFixed(0) + '%']; }), [1, 2]),
+      notes: ['제조원가, 판관비, 영업외비용을 합친 발생비용입니다. 분기 말에만 입력되는 감가상각 등이 아직 없는 달은 실제보다 작게 보입니다.'] };
+  } });
+
+  /* 16. 전월 대비 늘어난 비용 */
+  Q.push({ id: 'q16', label: '지난달보다 어떤 비용이 늘었어?', needs: ['month'], run: function (c) {
+    var idx = c.m.months.indexOf(c.month);
+    if (idx < 1) return { headline: '비교할 이전 달 데이터가 없습니다.', body: '', notes: [] };
+    var prevYm = c.baseMonth && c.m.months.indexOf(c.baseMonth) >= 0 && c.baseMonth < c.month ? c.baseMonth : c.m.months[idx - 1], cur = BM.expenseByAcct(c.m, c.month), prev = BM.expenseByAcct(c.m, prevYm), keys = {};
+    Object.keys(cur).concat(Object.keys(prev)).forEach(function (k) { keys[k] = 1; });
+    var list = Object.keys(keys).map(function (k) { var a = cur[k] ? cur[k].amt : 0, b = prev[k] ? prev[k].amt : 0; return { k: k, a: a, b: b, d: a - b }; }).sort(function (x, y) { return y.d - x.d; });
+    var up = list.filter(function (x) { return x.d > 0; }).slice(0, 8);
+    if (!up.length) return { headline: BM.ymLabel(c.month) + '에 ' + BM.ymLabel(prevYm) + '보다 늘어난 비용 항목은 없습니다.', body: '', notes: [] };
+    return { headline: BM.ymLabel(prevYm) + ' 대비 ' + BM.ymLabel(c.month) + '에 가장 늘어난 비용은 ' + up.slice(0, 3).map(function (x) { return x.k + ' +' + BM.won(x.d); }).join(', ') + ' 순입니다.',
+      body: tbl(['항목', BM.ymLabel(prevYm), BM.ymLabel(c.month), '증감'], up.map(function (x) { return [esc(x.k), BM.won(x.b), BM.won(x.a), BM.won(x.d)]; }), [1, 2, 3]),
+      notes: ['감가상각비·퇴직급여·충당부채처럼 분기 말에 한 번 반영되는 항목은 해당 달에 크게 늘어 보일 수 있습니다.'] };
+  } });
+
+  /* 17. 데이터 점검 (입력 오류, 매출 누락 등) */
+  Q.push({ id: 'q17', label: '입력이 잘못되거나 빠진 데이터가 있어?', needs: ['month?'], run: function (c) {
+    var ws = c.rc.warnings, notes = [];
+    var lines = ws.map(function (w) { return w.t; });
+    var rev = null;
+    if (c.month && c.focus === 'revenue') {
+      var b = c.pl.filter(function (x) { return x.ym === c.month; })[0];
+      var recon = (c.rc.months || []).filter(function (x) { return x.ym === c.month; })[0];
+      if (b) {
+        var med = (function () { var a = c.pl.map(function (x) { return x.rev; }).filter(function (x) { return x > 0; }).sort(function (x, y) { return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : 0; })();
+        var parts = [BM.ymLabel(c.month) + ' 매출은 분개장에 ' + BM.won(b.rev) + '입니다.'];
+        if (recon && recon.trades > 0) parts.push('거래내역 기준은 ' + BM.won(recon.trades) + '으로 분개장이 ' + BM.won(Math.max(0, recon.trades - recon.journal)) + (recon.trades > recon.journal ? ' 적어 매출 전표가 덜 입력된 것으로 보입니다.' : ' 많거나 같습니다.'));
+        else if (med > 0 && b.rev < med * 0.3) parts.push('다른 달 중앙값(' + BM.won(med) + ')보다 매우 적어 미입력일 수 있습니다.');
+        else parts.push('다른 달과 비교해 이상 징후는 보이지 않습니다.');
+        rev = parts.join(' ');
+      }
+    }
+    if (!lines.length && !rev) return { headline: '데이터 점검에서 발견된 문제가 없습니다.', body: '', notes: [] };
+    var errRe = /(전표|중복|수량×단가)/, errs = lines.filter(function (t) { return errRe.test(t); }), rest = lines.filter(function (t) { return !errRe.test(t); });
+    var ordered = c.focus === 'revenue' ? lines : errs.concat(rest);
+    var headLines = (c.focus === 'revenue' ? ordered : (errs.length ? errs : ordered)).slice(0, 3);
+    return { headline: rev || (errs.length && c.focus !== 'revenue' ? '입력이 잘못됐을 수 있는 항목 ' + errs.length + '건: ' + headLines.join(' / ') : '데이터 점검 ' + lines.length + '건: ' + headLines.join(' / ')),
+      body: '<ul class="wl">' + ordered.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>', notes: rev ? ['아래는 전체 점검 결과입니다.'] : [] };
+  } });
+
+  /* 18. 범위 밖(예측) 질문: 정직하게 한계를 밝힌다 */
+  Q.push({ id: 'q18', hidden: true, label: '앞으로 매출은 어떻게 될까?', needs: [], run: function (c) {
+    var last = c.pl.filter(function (b) { return b.rev > 0; }).slice(-4, -1), avg = last.length ? sumBy(last, function (b) { return b.rev; }) / last.length : 0;
+    return { headline: '이 도구는 장부에 기록된 과거 자료를 분석하며 미래 매출은 예측하지 않습니다.' + (avg ? ' 참고로 최근 ' + last.length + '개월(' + last.map(function (b) { return (+b.ym.slice(5)) + '월'; }).join('·') + ') 월평균 매출은 ' + BM.won(avg) + '입니다.' : ''), status: '잠정',
+      body: '', notes: ['예측에는 거래처별 계약 물량, 단가 변경, 계절성 같은 가정이 필요하고 이 도구에는 그런 정보가 없습니다. 위 평균은 예측이 아니라 과거 평균입니다.'] };
   } });
 
   function tile(l, v, n) { return '<div class="card tile"><div class="label">' + esc(l) + '</div><div class="value">' + v + '</div>' + (n ? '<div class="note">' + esc(n) + '</div>' : '') + '</div>'; }

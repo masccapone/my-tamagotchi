@@ -5,8 +5,8 @@
   var BM = g.BM;
   var E = BM.engine = {};
 
-  var BASE_STATUS = { q1: '추정', q2: '잠정', q3: '추정', q4: '확정', q5: '확정', q6: '잠정', q7: '확정', q8: '추정', q9: '추정', q10: '확정', q11: '확정' };
-  var BASE_SRC = { q1: '분개장(미지급금) + 결제 이력', q2: '분개장(보통예금)', q3: '분개장(채권·채무) + 결제 이력', q4: '분개장', q5: '분개장', q6: '분개장', q7: '분개장', q8: '분개장 + 거래내역', q9: '분개장(보통예금) + 입력한 기준 잔액', q10: '거래내역 + 분개장', q11: '거래내역' };
+  var BASE_STATUS = { q12: '확정', q13: '추정', q14: '잠정', q15: '잠정', q16: '잠정', q17: '확정', q18: '잠정', q1: '추정', q2: '잠정', q3: '추정', q4: '확정', q5: '확정', q6: '잠정', q7: '확정', q8: '추정', q9: '추정', q10: '확정', q11: '확정' };
+  var BASE_SRC = { q12: '분개장(외상매출금)', q13: '분개장(미지급금) + 결제 이력', q14: '분개장 + 거래내역', q15: '분개장', q16: '분개장', q17: '분개장 + 거래내역 대조', q18: '분개장(과거 평균)', q1: '분개장(미지급금) + 결제 이력', q2: '분개장(보통예금)', q3: '분개장(채권·채무) + 결제 이력', q4: '분개장', q5: '분개장', q6: '분개장', q7: '분개장', q8: '분개장 + 거래내역', q9: '분개장(보통예금) + 입력한 기준 잔액', q10: '거래내역 + 분개장', q11: '거래내역' };
 
   /* files: [{name, kind:'journal'|'trades'|'vendors', data}] → S | null */
   E.build = function (files) {
@@ -57,7 +57,8 @@
     if (!q) return { error: 'unknown-question' };
     var needs = q.needs, notes = [];
     var c = { m: S.m, pl: S.pl, ar: S.ar, ap: S.ap, rc: S.rc, bepMonths: S.bepMonths, useEst: opt.useEst !== false, anchor: opt.anchor || null, canEditAnchor: !!opt.canEditAnchor };
-    if (needs.indexOf('month') >= 0) c.month = p.month || S.m.asOf.slice(0, 7);
+    if (needs.indexOf('month') >= 0 || needs.indexOf('month?') >= 0) c.month = p.month || (needs.indexOf('month') >= 0 ? S.m.asOf.slice(0, 7) : null);
+    c.days = p.days || null; c.topN = p.topN || null; c.view = p.view || null; c.focus = p.focus || null; c.baseMonth = p.baseMonth || null;
     if (needs.indexOf('acct') >= 0 || needs.indexOf('acct?') >= 0) {
       c.acct = p.acct || '';
       if (needs.indexOf('acct') >= 0 && !c.acct) return { error: 'acct-required', q: q };
@@ -75,7 +76,9 @@
     var b = c.month ? S.pl.filter(function (x) { return x.ym === c.month; })[0] : null;
     if (b && st === '확정' && b.flags.some(function (f) { return f.k === 'partial' || f.k === 'drop'; })) st = '잠정';
     return { q: q, c: c, answer: a, status: st, source: BASE_SRC[qid] || '분개장', asOf: S.m.asOf,
-      warnings: S.rc.warnings.filter(function (w) { return w.lvl === 'bad'; }).slice(0, 2).map(function (w) { return w.t; }),
+      // 매출·이익·점검처럼 데이터 오류가 숫자에 직접 영향을 주는 질문에만 경고 내용을 붙이고, 나머지는 건수만 알린다
+      warnings: ['q6', 'q8', 'q14', 'q17', 'q15', 'q16'].indexOf(qid) >= 0 ? S.rc.warnings.filter(function (w) { return w.lvl === 'bad'; }).slice(0, 2).map(function (w) { return w.t; }) : [],
+      warnTotal: S.rc.warnings.length,
       notes: (a.notes || []).concat(notes) };
   };
 
@@ -84,6 +87,7 @@
     if (res.error) return null;
     var lines = ['[' + res.status + '] ' + res.asOf + ' 기준', res.answer.headline];
     if (res.warnings.length) lines.push('※ 데이터 경고: ' + res.warnings.join(' / '));
+    else if (res.warnTotal) lines.push('※ 데이터 점검 ' + res.warnTotal + '건이 있습니다.');
     return lines.join('\n');
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -9,7 +9,7 @@
   var curQ = null, chart = null, useEst = true;
   var mode = 'standalone', role = null, dirty = false, serverMeta = null;
   var settings = { anchor: null };
-  var lastVendorText = '', lastMonth = '';
+  var lastVendorText = '', lastMonth = '', extra = {};
   var JSON_H = { 'Content-Type': 'application/json' };
 
   /* ---------- 서버 통신 ---------- */
@@ -199,7 +199,7 @@
 
   /* ---------- 질문 ---------- */
   function renderQuestionList() {
-    $('qlist').innerHTML = BM.questions.map(function (q) { return '<button class="qchip' + (curQ && curQ.id === q.id ? ' on' : '') + '" data-q="' + q.id + '">' + esc(q.label) + '</button>'; }).join('');
+    $('qlist').innerHTML = BM.questions.filter(function (q) { return !q.hidden; }).map(function (q) { return '<button class="qchip' + (curQ && curQ.id === q.id ? ' on' : '') + '" data-q="' + q.id + '">' + esc(q.label) + '</button>'; }).join('');
     Array.prototype.forEach.call($('qlist').querySelectorAll('button'), function (b) {
       b.addEventListener('click', function () { $('understood').textContent = ''; selectQ(b.getAttribute('data-q'), null, 'chip'); });
     });
@@ -211,13 +211,16 @@
     renderQuestionList();
     var needs = curQ.needs, h = '';
     var months = S.m.months.slice().reverse(), defM = S.m.asOf.slice(0, 7);
-    if (preset) { lastVendorText = preset.vendorText || ''; lastMonth = preset.month || defM; }
+    if (preset) { lastVendorText = preset.vendorText || ''; lastMonth = preset.month || defM; extra = { days: preset.days, topN: preset.topN, view: preset.view, focus: preset.focus, baseMonth: preset.baseMonth }; }
+    else if (source === 'chip') extra = {};
     if (source === 'chip') logEvent({ type: 'ask', source: 'chip', id: id });
     if (needs.indexOf('vendor') >= 0 || needs.indexOf('vendor?') >= 0) {
       h += '<label>업체 <input id="p-vendor" list="vlist" placeholder="' + (needs.indexOf('vendor?') >= 0 ? '비워 두면 전체' : '업체명 입력') + '" value="' + esc(lastVendorText) + '"></label>' +
         '<datalist id="vlist">' + S.vendorKeys.map(function (k) { return '<option value="' + esc(S.m.vendorName(k)) + '">'; }).join('') + '</datalist>';
     }
-    if (needs.indexOf('month') >= 0) h += '<label>월 <select id="p-month">' + months.map(function (x) { return '<option value="' + x + '"' + (x === (lastMonth || defM) ? ' selected' : '') + '>' + BM.ymLabel(x) + '</option>'; }).join('') + '</select></label>';
+    if (needs.indexOf('days?') >= 0) h += '<label>며칠 넘은 것만 <input id="p-days" type="number" min="0" style="width:5em" value="' + esc(extra.days || '') + '" placeholder="전체"></label>';
+    if (needs.indexOf('topn?') >= 0) h += '<label>상위 몇 곳 <input id="p-topn" type="number" min="1" max="50" style="width:4em" value="' + esc(extra.topN || '') + '" placeholder="5"></label>';
+    if (needs.indexOf('month') >= 0 || needs.indexOf('month?') >= 0) h += '<label>월 <select id="p-month">' + months.map(function (x) { return '<option value="' + x + '"' + (x === (lastMonth || defM) ? ' selected' : '') + '>' + BM.ymLabel(x) + '</option>'; }).join('') + '</select></label>';
     if (needs.indexOf('acct') >= 0 || needs.indexOf('acct?') >= 0) h += '<label>비용 항목 <select id="p-acct"></select></label>';
     $('params').innerHTML = h;
     if ($('p-acct')) { fillAcct(); if (preset && preset.acct) $('p-acct').value = preset.acct; }
@@ -235,7 +238,9 @@
   }
 
   function runQ() {
-    var p = {};
+    var p = { view: extra.view, focus: extra.focus, baseMonth: extra.baseMonth };
+    if ($('p-days')) p.days = +$('p-days').value || null;
+    if ($('p-topn')) p.topN = +$('p-topn').value || null;
     if ($('p-month')) { p.month = $('p-month').value; lastMonth = p.month; }
     if ($('p-acct')) p.acct = $('p-acct').value;
     if ($('p-vendor')) { lastVendorText = $('p-vendor').value; p.vendorText = lastVendorText; }
@@ -248,7 +253,7 @@
     if (res.error) { $('answer').innerHTML = '<div class="callout bad">질문을 처리하지 못했습니다.</div>'; return; }
     var cls = res.status === '확정' ? 'fixed' : res.status === '잠정' ? 'prov' : 'est';
     var meta = '<div class="meta"><span class="st ' + cls + '">' + res.status + '</span> 기준일 ' + esc(res.asOf) + ' · 근거: ' + esc(res.source) +
-      (res.warnings.length ? '<div class="metawarn">데이터 경고: ' + res.warnings.map(esc).join(' / ') + '</div>' : '') + '</div>';
+      (res.warnings.length ? '<div class="metawarn">데이터 경고: ' + res.warnings.map(esc).join(' / ') + '</div>' : (res.warnTotal ? '<div class="metanote">데이터 점검 ' + res.warnTotal + '건이 있습니다. 위 요약에서 확인하세요.</div>' : '')) + '</div>';
     $('answer').innerHTML = '<div class="card ans">' + meta + '<div class="headline">' + esc(res.answer.headline) + '</div>' + (res.answer.body || '') +
       (res.notes.length ? '<ul class="notes">' + res.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
     if (res.answer.after) res.answer.after($('answer'), runQ);
@@ -259,6 +264,12 @@
     text = text.trim();
     if (!text || !S) return;
     var r = BM.nl.parse(text, E.nlContext(S));
+    if (r && r.unknownVendor) {
+      $('understood').textContent = '';
+      $('answer').innerHTML = '<div class="callout warn">"' + esc(r.unknownVendor) + '"과(와) 일치하는 업체를 찾지 못했습니다. 업체 이름을 다시 확인해 주세요.</div>';
+      logEvent({ type: 'ask', source: 'nl', id: r.id, text: text.slice(0, 200) });
+      return;
+    }
     if (!r) {
       $('understood').textContent = '';
       $('answer').innerHTML = '<div class="callout warn">질문을 이해하지 못했습니다. 아래 질문 중에서 고르거나, 업체명과 월을 넣어 다시 물어보세요. (예: "○○환경 이번 달 줄 돈 얼마야?")</div>';
@@ -271,7 +282,7 @@
     if (r.acct) parts.push('항목: ' + r.acct);
     $('understood').textContent = '이렇게 이해했습니다 → ' + parts.join(' · ') + ' (틀리면 아래에서 바꾸세요)';
     logEvent({ type: 'ask', source: 'nl', id: r.id, text: text.slice(0, 200) });
-    selectQ(r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct }, 'nl');
+    selectQ(r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth }, 'nl');
   }
 
   /* ---------- 월별 추이 ---------- */

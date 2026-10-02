@@ -17,21 +17,21 @@
   function findMonth(text, ctx) {
     var asOfYm = ctx.asOf.slice(0, 7), y = +asOfYm.slice(0, 4), mo = +asOfYm.slice(5);
     function ym(yy, mm) { return yy + '-' + ('0' + mm).slice(-2); }
+    function resolve(n) {
+      var cand = (ctx.months || []).filter(function (x) { return +x.slice(5) === n; }).sort();
+      if (cand.length) { var ok = cand.filter(function (x) { return x <= asOfYm; }); var list = ok.length ? ok : cand; return list[list.length - 1]; }
+      return n <= mo ? ym(y, n) : ym(y - 1, n);
+    }
     var m;
     if ((m = /(\d{4})\s*년\s*(\d{1,2})\s*월/.exec(text))) return ym(+m[1], +m[2]);
     if (/(이번\s*달|금월|당월)/.test(text)) return asOfYm;
     if (/(지난\s*달|저번\s*달|전월|지난달)/.test(text)) return mo === 1 ? ym(y - 1, 12) : ym(y, mo - 1);
-    if ((m = /(\d{1,2})\s*월/.exec(text))) {
-      var n = +m[1];
-      if (n < 1 || n > 12) return null;
-      var cand = (ctx.months || []).filter(function (x) { return +x.slice(5) === n; }).sort();
-      if (cand.length) {
-        var ok = cand.filter(function (x) { return x <= asOfYm; });
-        return (ok.length ? ok : cand)[(ok.length ? ok : cand).length - 1];
-      }
-      return n <= mo ? ym(y, n) : ym(y - 1, n);
-    }
-    return null;
+    var all = [], re = /(\d{1,2})\s*월/g;
+    while ((m = re.exec(text))) { var n = +m[1]; if (n >= 1 && n <= 12) all.push(resolve(n)); }
+    if (!all.length) return null;
+    // "7월보다 8월에", "7월 대비 8월": 비교 문장이면 묻는 달은 나중 달
+    if (all.length > 1 && /(보다|대비|비교|에 비해)/.test(text)) return all.slice().sort()[all.length - 1];
+    return all[0];
   }
 
   function findVendor(text, ctx) {
@@ -60,49 +60,112 @@
     return best;
   }
 
-  var RULES = [
-    ['q8', /(BEP|손익\s*분기|이익.{0,6}전환|흑자.{0,6}(전환|되려|나려)|적자.{0,6}(탈출|벗어)|매출.{0,12}(더|얼마).{0,8}(필요|해야))/i],
-    ['q9', /(통장|계좌|보유\s*현금|현금.{0,6}(얼마|있|보유)|잔고)/],
-    ['q10', /단가/],
-    ['q11', /(물량|반입량|반출량|들어온\s*양|몇\s*톤|톤수|몇\s*kg)/],
-    ['q2', /(들어\s*왔|들어\s*와|입금.{0,6}(됐|되었|됬|했|확인|여부)|받았)/],
-    ['q1', /(줘야|줄\s*돈|지급\s*(할|해야|예정|일|해|하|금)|내야|결제.{0,6}(언제|얼마)|나갈\s*돈)/],
-    ['q3', /(나갈\s*돈|들어올\s*돈|자금\s*수지|현금\s*흐름|받을\s*돈|줄\s*돈)/],
-    ['q7', /(줄\s*수\s*있|줄일\s*수|절감|비용.{0,6}(줄|아낄)|줄여|줄이)/],
-    ['q5', /(왜|이유|원인).{0,14}(많|늘|증가|올)|(많이|늘어|증가|올랐).{0,10}(나갔|왜|이유)/],
-    ['q6', /(이익|손실|손익|적자|흑자)/],
-    ['q4', /((뭐야|무슨|무엇|뭔가|어떤|내역).{0,8}비용|비용.{0,8}(뭐야|무슨|무엇|내역|뭔가))/]
-  ];
+  var NUM_KO = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9, 열: 10 };
+  var SUFFIX = /([가-힣A-Za-z0-9]{2,}?(?:환경|산업|물류|에너지|건설|개발|상사|테크|자원|리싸이클링|리사이클링|로지스|종합|플라스틱|전자|철강|이엔피|이엔비|이앤피|운수|기업|무역|공사|중공업|유통|화학|소재|그린텍|그린))/;
+
+  function features(t) {
+    var f = {};
+    f.forecast = /(예측|전망|내년|내후년|향후|앞으로|다음\s*분기|다음\s*해|나올\s*(거|것)|예상\s*매출)/.test(t);
+    f.bep = /(BEP|손익\s*분기|적자\s*(안|면|를\s*면|탈출|벗어)|흑자.{0,6}(전환|되려|나려)|이익.{0,6}전환|매출.{0,14}(더|얼마).{0,8}(필요|해야|돼야|되어야|는\s*돼))/i.test(t);
+    f.cash = /(통장|계좌|잔고|보유\s*현금|현금.{0,6}(얼마|있|보유)|은행.{0,8}(돈|얼마|잔))/.test(t);
+    f.neg = /(마이너스|음수)/.test(t);
+    f.check = /(오류|잘못|이상한|이상\s*없|누락|빠진|제대로|맞는\s*거|맞아|점검|검증|입력\s*안)/.test(t);
+    f.price = /(단가|얼마\s*(로|에)\s*받)/.test(t);
+    f.vol = /(물량|반입|반출|몇\s*톤|톤수|몇\s*kg)/.test(t);
+    f.save = /(줄\s*수\s*있|줄일\s*수|절감|비용.{0,6}(줄|아낄)|줄여|줄이)/.test(t);
+    f.why = /(왜|이유|원인)/.test(t);
+    f.grow = /(늘|증가|올랐|많이\s*나갔|증감|어디서\s*늘)/.test(t);
+    f.dep = /(입금|들어\s*왔|들어\s*와|들어\s*온\s*돈|받았|수금)/.test(t);
+    f.ar = /(미수|받을\s*돈|못\s*받|외상(?!\s*매입)|매출\s*채권|채권)/.test(t);
+    f.ap = /(미지급|줄\s*돈|줘야|지급할|지급해야|외상\s*매입|채무|갚)/.test(t);
+    f.rev = /(매출|판매\s*금액|판매액|수입)/.test(t) && !/(미수|채권)/.test(t);
+    f.profit = /(이익|손실|손익|적자|흑자)/.test(t);
+    f.exp = /(비용|지출|쓴\s*돈|나간\s*돈|나갔|나왔)/.test(t);
+    f.due = /(이번\s*달|언제|예정|기한|도래|내야|줘야)/.test(t);
+    f.both = /(나갈\s*돈.*들어올\s*돈|들어올\s*돈.*나갈\s*돈|자금\s*수지|현금\s*흐름)/.test(t);
+    f.top = /(상위|제일\s*큰|가장\s*큰|큰\s*(곳|업체)|많은\s*(곳|업체)|(\d+|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(곳|개|군데|위)|순위)/.test(t);
+    f.all = /(전부|전체|총액|총\s|합계|모두|다\s*해서)/.test(t);
+    f.what = /(뭐야|무슨|무엇|뭔가|어떤|내역|이게)/.test(t);
+    return f;
+  }
+
+  function findTopN(t) {
+    var m = /(\d+)\s*(곳|개|군데|위)/.exec(t);
+    if (m) return +m[1];
+    m = /(한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(곳|개|군데)/.exec(t);
+    return m ? NUM_KO[m[1]] : null;
+  }
+  function findDays(t) {
+    var m;
+    if ((m = /(\d+)\s*일\s*(넘|이상|초과|지난)/.exec(t))) return +m[1];
+    if ((m = /(\d+)\s*(개월|달)\s*(넘|이상|초과|지난)/.exec(t))) return +m[1] * 30;
+    if (/(반년|6\s*개월)\s*(넘|이상)?/.test(t) && /(넘|이상|오래|안\s*들어)/.test(t)) return 180;
+    if (/(1\s*년|일\s*년)\s*(넘|이상)/.test(t)) return 365;
+    if (/(오래된|장기)/.test(t)) return 90;
+    return null;
+  }
+
+  /* 질문에 업체처럼 보이는 말이 있는데 자료에 없으면 그 말을 돌려준다 */
+  function unknownVendorPhrase(t, vendor, needsVendor) {
+    if (vendor) return null;
+    var m = SUFFIX.exec(t);
+    if (m && !/^(이번|지난|전체|우리|회사)/.test(m[1])) return m[1];
+    if (needsVendor) {
+      var tk = tokens(t).filter(function (x) { return !/(미수금|미지급금|단가|물량|매출|입금|얼마|알려|받고|바뀐|바뀌|있어|줄|돈)/.test(x); });
+      if (tk.length) return tk[0];
+    }
+    return null;
+  }
 
   BM.nl = {
     parse: function (text, ctx) {
       text = String(text || '').trim();
       if (!text) return null;
       var vendor = findVendor(text, ctx), acct = findAcct(text, ctx), month = findMonth(text, ctx);
-      var id = null, i, hit = [];
-      // 비용 항목 이름(예: 지급수수료)에 들어 있는 단어가 질문 종류 판단을 흐리지 않도록 뺀다
       var rt = acct ? text.replace(acct, ' ') : text;
-      for (i = 0; i < RULES.length; i++) if (RULES[i][1].test(rt)) hit.push(RULES[i][0]);
-      var money = /(미수|받을\s*돈|채권)/.test(rt), pay = /(미지급|줄\s*돈|채무)/.test(rt);
-      // 업체 유무에 따라 같은 표현의 질문이 달라진다
-      if (hit.indexOf('q1') >= 0 || hit.indexOf('q3') >= 0 || money || pay) {
-        if (hit.indexOf('q2') >= 0) id = 'q2';
-        else if (vendor) id = (money && !pay) ? 'q2' : 'q1';
-        else if (hit.indexOf('q3') >= 0 || money || pay) id = 'q3';
-        else id = 'q3';
+      var f = features(rt), id = null, view = null, focus = null;
+      var days = findDays(rt), topN = findTopN(rt);
+
+      if (f.forecast) id = 'q18';
+      else if (f.bep) id = 'q8';
+      else if (f.cash) id = 'q9';
+      else if (f.ap && f.neg) { id = 'q13'; view = 'negative'; }
+      else if (f.check) { id = 'q17'; if (f.rev || /매출/.test(text)) focus = 'revenue'; }
+      else if (f.price) id = 'q10';
+      else if (f.vol) id = 'q11';
+      else if (f.save) id = 'q7';
+      else if (f.why && (acct || f.exp)) id = 'q5';
+      else if (f.grow && (f.exp || acct)) id = 'q16';
+      else if (f.both) id = 'q3';
+      else if (f.dep && !(f.ar && !vendor && (f.all || f.top || days))) id = 'q2';
+      else if (f.ar) {
+        if (!vendor && f.due && !days && !f.all && !f.top) id = 'q3';
+        else id = 'q12';
       }
-      if (!id) id = hit[0] || null;
-      if (acct && /(뭐야|뭔가|무슨|무엇|내역|이게|어떤)/.test(rt) && ['q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11'].indexOf(id) < 0 && !vendor) id = 'q4';
-      if (id === 'q4' && !acct) id = null;
-      if (id === 'q5' && !acct && !/비용|지출|나갔/.test(text)) id = hit.filter(function (x) { return x !== 'q5'; })[0] || 'q5';
-      if (!id && vendor) id = null;
+      else if (f.ap) {
+        if (vendor && f.due) id = 'q1';
+        else if (!vendor && f.due && /(들어올|받을)/.test(rt)) id = 'q3';
+        else id = 'q13';
+      }
+      else if (f.rev) id = 'q14';
+      else if (acct && (f.exp || f.what || /얼마|나왔|나갔|쓴/.test(rt))) id = 'q4';
+      else if (f.exp && (f.top || /(큰|많|제일|가장)/.test(rt))) id = 'q15';
+      else if (f.exp) id = 'q15';
+      else if (f.profit) id = 'q6';
+      if (id === 'q4' && !acct) id = 'q15';
       if (!id) return null;
+
       var needsVendor = ['q1', 'q10'].indexOf(id) >= 0;
+      var vendorUsed = ['q1', 'q2', 'q10', 'q11', 'q12', 'q13', 'q14'].indexOf(id) >= 0;
+      var unknown = vendorUsed ? unknownVendorPhrase(text, vendor, needsVendor) : null;
+      if (unknown && /^(이번|지난|전체|우리|회사|올해)/.test(unknown)) unknown = null;
       var ambiguous = [];
-      if (needsVendor && !vendor) ambiguous.push('업체');
+      if (needsVendor && !vendor && !unknown) ambiguous.push('업체');
       if (vendor && vendor.many) ambiguous.push('업체가 여러 곳');
       if (id === 'q4' && !acct) ambiguous.push('비용 항목');
-      return { id: id, vendor: vendor, month: month, acct: acct, ambiguous: ambiguous, hits: hit };
+      var baseMonth = null;
+      if (id === 'q16') { var ms = []; var rg = /(\d{1,2})\s*월/g, mm; while ((mm = rg.exec(text))) { if (+mm[1] >= 1 && +mm[1] <= 12) ms.push(findMonth(mm[1] + '월', ctx)); } if (ms.length > 1) baseMonth = ms.slice().sort()[0]; }
+      return { id: id, vendor: unknown ? null : vendor, unknownVendor: unknown, month: month, baseMonth: baseMonth, acct: acct, days: days, topN: topN, view: view, focus: focus, ambiguous: ambiguous, hits: [] };
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
