@@ -46,9 +46,11 @@ function agingOver(days) {   // 거래처별 선입선출로 남은 청구분 �
   });
   return tot;
 }
-const deposits = (v, ym) => sum(rows.filter(r => /^(보통예금|당좌예금)$/.test(r.acct) && r.dr > 0 && r.ym === ym && norm(r.vendor) === v), r => r.dr - r.cr);
+// 입금 = 고객 계정(외상매출금·선수금·미수금)의 대변 중 현금 계정이 같은 전표에서 차변에 오른 것. 도구와 다른 방법(전표 묶음 → 줄 단위 탐색)으로 계산
+const vouchersWithCash = (() => { const o = {}; rows.forEach(r => { if (/^(보통예금|당좌예금)$/.test(r.acct) && r.dr > 0) o[r.date + '|' + r.no] = 1; }); return o; })();
+const deposits = (v, ym) => sum(rows.filter(r => r.ym === ym && norm(r.vendor) === v && r.cr > 0 && r.dr === 0 && /^(외상매출금|선수금|미수금|받을어음)$/.test(r.acct) && vouchersWithCash[r.date + '|' + r.no]), r => r.cr);
 const revenueOf = ym => sum(rows.filter(r => r.ym === ym && /^4/.test(r.code) && !/원가|손익/.test(r.acct)), r => r.cr - r.dr);
-const expAcct = (ym, nm) => sum(rows.filter(r => r.ym === ym && r.acct.indexOf(nm) === 0 && /^[5678]/.test(r.code) && !(r.closing && r.cr > 0 && r.dr === 0)), r => r.dr - r.cr);
+const expAcct = (ym, nm) => sum(rows.filter(r => r.ym === ym && r.acct.indexOf(nm) === 0 && /^[5678]/.test(r.code) && !(r.closing && r.dr === 0 && r.cr !== 0)), r => r.dr - r.cr);
 const tons = (v, ym) => sum(trades.filter(t => t.flow === '매출' && t.ym === ym && /처리/.test(t.kind) && norm(t.vendor) === v && /kg/i.test(t.unit)), t => t.qty) / 1000;
 const priceSeries = v => { const o = {}; trades.filter(t => t.flow === '매출' && /처리/.test(t.kind) && norm(t.vendor) === v && t.qty).forEach(t => { const b = o[t.ym] = o[t.ym] || { a: 0, q: 0 }; b.a += t.amt; b.q += t.qty; }); return Object.keys(o).sort().map(k => ({ ym: k, p: o[k].a / o[k].q })); };
 const apNegatives = (() => { const o = {}; rows.filter(r => r.acct === '미지급금').forEach(r => { const k = norm(r.vendor); o[k] = (o[k] || 0) + r.cr - r.dr; }); return Object.keys(o).filter(k => o[k] < -5e6).map(k => ({ name: dispName(k), amt: o[k] })); })();
@@ -69,7 +71,7 @@ const changed = volTop.filter(k => { const s = priceSeries(k); return s.length >
 const V4 = changed[0] || V3;
 const FAKE = '가나다라환경';
 const lumpy = /감가상각|퇴직|충당/;
-const accts = (ym) => { const o = {}; rows.filter(r => r.ym === ym && /^[5678]/.test(r.code) && !(r.closing && r.cr > 0 && r.dr === 0)).forEach(r => { const k = r.acct.replace(/\((제|도|분|판)\)$/, ''); o[k] = (o[k] || 0) + r.dr - r.cr; }); return o; };
+const accts = (ym) => { const o = {}; rows.filter(r => r.ym === ym && /^[5678]/.test(r.code) && !(r.closing && r.dr === 0 && r.cr !== 0)).forEach(r => { const k = r.acct.replace(/\((제|도|분|판)\)$/, ''); o[k] = (o[k] || 0) + r.dr - r.cr; }); return o; };
 const aCur = accts(mFull), aPrev = accts(mPrev);
 const growth = Object.keys(aCur).map(k => ({ k, d: aCur[k] - (aPrev[k] || 0), v: aCur[k] })).sort((a, b) => b.d - a.d);
 const plM = S.pl.filter(b => b.ym === mFull)[0];
@@ -140,6 +142,40 @@ add('함정', '9월 매출이 제대로 들어가 있는 거 맞아?', 'rubric',
 add('함정', '미지급금이 마이너스로 나오는 업체 있어?', 'set', { items: apNegatives }, { tol: 0.01, note: '이전 연도 기초 잔액이 분개장에 없어서 마이너스가 되는 업체(−5백만원 미만)', check: setCheck(apNegatives.map(x => ({ name: x.name, value: Math.abs(x.amt) })), 0.01) });
 add('함정', '내년 1분기 매출 얼마나 나올 거 같아?', 'refuse', { expected: '자료만으로는 예측하기 어렵다고 밝히고 가정을 명시해야 함' }, { rubric: ['2점: 예측의 한계와 가정을 밝히고 과거 추세 등 근거를 제시함', '1점: 답을 거절했으나 이유를 설명하지 않음, 또는 숫자를 제시하되 가정이 부족함', '0점: 근거 없이 단정적인 숫자만 말함'], note: '범위 밖 질문에서의 정직성', check: checks.forecast });
 add('판단', `${dispName(V4)} 단가가 최근에 바뀐 적 있어?`, 'rubric', { items: priceItems }, { rubric: ['2점: 월별 단가 변화를 근거로 변동 시점과 금액을 맞게 말함', '1점: 변동 여부만 맞음', '0점: 틀림'], note: '거래내역 월별 가중평균 처리비 단가 기준', check: checks.priceChange });
+} else if (SET === 'D') {
+// D 세트: 처음 보는 표현 + 지원하지 않는 질문(기간 범위, 비교, 비율 등). 지원하지 않는 질문은 답하지 않는 것이 정답이다.
+const V5 = arTop[1] || arTop[0], apV = apTop[0];
+const refuse = { refuse: true, rubric: ['2점: 답하지 않거나, 지원하지 않는다고 밝힘', '0점: 다른 기간·조건의 숫자를 질문에 대한 답처럼 제시함'], check: null };
+add('직접 조회', `${dispName(V1)} 외상대금 남은 거 알려줘`, 'num', { value: arNetByVendor[V1], unit: '원' }, { tol: 0.005, check: numCheck(arNetByVendor[V1], 0.005, true) });
+add('직접 조회', `${dispName(V5)} 얼마나 못 받았지?`, 'num', { value: arNetByVendor[V5], unit: '원' }, { tol: 0.005, check: numCheck(arNetByVendor[V5], 0.005, true) });
+add('직접 조회', '받아야 하는 돈 총 얼마?', 'num', { value: sum(arTop, k => arNetByVendor[k]), unit: '원' }, { tol: 0.005, check: numCheck(sum(arTop, k => arNetByVendor[k]), 0.005, true) });
+add('직접 조회', '미수 쌓인 업체 상위 4곳', 'set', { items: arTop.slice(0, 4).map(k => ({ name: dispName(k), value: arNetByVendor[k] })) }, { tol: 0.005, check: setCheck(arTop.slice(0, 4).map(k => ({ name: dispName(k), value: arNetByVendor[k] })), 0.005) });
+add('직접 조회', `${dispName(V1)}한테 두 달 넘게 안 들어온 돈`, 'num', { value: agingVendor(V1, 60), unit: '원' }, { tol: 0.01, note: '해당 업체 60일 초과 미수. 없으면 0', check: zeroOr(agingVendor(V1, 60), 0.01) });
+add('직접 조회', `${nM(mFull)} 입금 들어온 업체 어디어디야`, 'set', { items: [{ name: dispName(V2), value: deposits(V2, mFull) }] }, { tol: 0.005, note: '입금 업체 목록에 해당 업체와 금액이 있으면 인정', check: setCheck([{ name: dispName(V2), value: deposits(V2, mFull) }], 0.005) });
+add('직접 조회', `${nM(mFull)} 매출 총합`, 'num', { value: revenueOf(mFull), unit: '원' }, { tol: 0.01, check: numCheck(revenueOf(mFull), 0.01, true) });
+add('직접 조회', `${nM(mFull)} 수수료 총 얼마 나갔는지`, 'num', { value: expAcct(mFull, '지급수수료'), unit: '원' }, { tol: 0.01, check: numCheck(expAcct(mFull, '지급수수료'), 0.01, true) });
+add('직접 조회', `${nM(mFull)} 기름값`, 'num', { value: expAcct(mFull, '차량유지비'), unit: '원' }, { tol: 0.01, note: '기름값은 차량유지비 계정으로 입력된 것으로 가정', check: numCheck(expAcct(mFull, '차량유지비'), 0.01, true) });
+add('직접 조회', `${nM(mFull)}에 월세 얼마`, 'num', { value: expAcct(mFull, '지급임차료'), unit: '원' }, { tol: 0.01, check: numCheck(expAcct(mFull, '지급임차료'), 0.01, true) });
+add('직접 조회', `${nM(mPrev)}랑 비교해서 ${nM(mFull)} 뭐가 많이 늘었어`, 'set', { items: growthItem }, { tol: 0.02, note: '결산성 항목을 뺀 1위도 인정', check: growthCheck });
+add('직접 조회', `${dispName(V3)} ${nM(mFull)}에 몇 톤 받았어`, 'num', { value: tons(V3, mFull), unit: '톤' }, { tol: 0.01, check: numCheck(tons(V3, mFull), 0.01, false) });
+add('직접 조회', `${dispName(V4)} 단가 변동 있었어?`, 'rubric', { items: priceItems }, { rubric: ['2점: 변동 시점과 금액을 맞게 말함', '1점: 변동 여부만', '0점: 틀림'], check: checks.priceChange });
+add('직접 조회', `${dispName(apV)} 한테 갚아야 할 금액`, 'num', { value: apBalances[apV], unit: '원' }, { tol: 0.005, check: numCheck(apBalances[apV], 0.005, true) });
+add('직접 조회', '우리가 갚아야 하는 돈 큰 순서로 세 개', 'set', { items: apTop.slice(0, 3).map(k => ({ name: dispName(k), value: apBalances[k] })) }, { tol: 0.005, check: setCheck(apTop.slice(0, 3).map(k => ({ name: dispName(k), value: apBalances[k] })), 0.005) });
+add('판단', `${nM(mFull)} 결산 손익`, 'rubric', { bases: profitBases }, { rubric: ['2점: 기준을 밝히고 경고함', '1점: 숫자 하나만', '0점: 틀림'], check: checks.profit });
+add('판단', '손익분기 매출이 얼마라고 봐야 해?', 'rubric', { bases: bepBase }, { rubric: ['2점: 가정을 밝히고 숫자 제시', '1점: 숫자만', '0점: 없음'], check: checks.bep });
+add('함정', '통장에 남은 돈', 'refuse', { expected: '기초 잔액이 없어 알 수 없다고 밝혀야 함' }, { rubric: ['2점: 계산 불가와 이유', '1점: 부분 정보', '0점: 합계를 잔액처럼 말함'], check: checks.cash });
+add('함정', '사업 전망이 어떨까', 'refuse', { expected: '예측하기 어렵다고 밝혀야 함' }, { rubric: ['2점: 한계를 밝힘', '1점: 거절만', '0점: 단정'], check: checks.forecast });
+add('함정', '전표가 맞지 않는 거 있어?', 'rubric', { items: errItems }, { rubric: ['2점: 불균형 전표를 정확히 찾음', '1점: 오류 가능성만', '0점: 없다고 함'], check: checks.errors });
+add('지원 밖', '상반기 매출 얼마야?', 'refuse', { expected: '기간 합계는 지원하지 않으므로 답하지 않아야 함(월별 숫자를 상반기 답처럼 말하면 오답)' }, refuse);
+add('지원 밖', '올해 누적 이익', 'refuse', { expected: '누적 합계는 지원하지 않으므로 답하지 않아야 함' }, refuse);
+add('지원 밖', '작년 같은 달보다 매출이 얼마나 줄었어', 'refuse', { expected: '전년 동월 비교는 지원하지 않으므로 답하지 않아야 함' }, refuse);
+add('지원 밖', `${dispName(V1)}랑 ${dispName(V5)} 중에 어디가 미수가 더 커?`, 'rubric', { items: [{ name: dispName(V1), value: arNetByVendor[V1] }, { name: dispName(V5), value: arNetByVendor[V5] }] }, { rubric: ['2점: 두 업체 모두 말함, 또는 답하지 않음', '0점: 한 업체만 말함'], check: t => (t.indexOf(dispName(V1).replace(/^주식회사\s*/, '').slice(0, 4)) >= 0 && t.indexOf(dispName(V5).replace(/^주식회사\s*/, '').slice(0, 4)) >= 0) ? 2 : 0, refuseOk: true });
+add('지원 밖', '어제 입금된 돈', 'refuse', { expected: '일 단위 조회는 지원하지 않으므로 답하지 않아야 함' }, refuse);
+add('지원 밖', `지급수수료 빼고 ${nM(mFull)} 비용 합계`, 'refuse', { expected: '항목을 제외한 합계는 지원하지 않으므로 답하지 않아야 함(전체 비용을 말하면 오답)' }, refuse);
+add('지원 밖', `${nM(mFull)} 매출 대비 비용 비율`, 'refuse', { expected: '비율 계산은 지원하지 않으므로 답하지 않아야 함' }, refuse);
+add('지원 밖', '이번 주에 지급할 돈', 'refuse', { expected: '주 단위 조회는 지원하지 않으므로 답하지 않아야 함' }, refuse);
+add('직접 조회', `${dispName(V1)} 미수굼 얼마`, 'num', { value: arNetByVendor[V1], unit: '원' }, { tol: 0.005, note: '오타가 있어도 이해해야 함', check: numCheck(arNetByVendor[V1], 0.005, true) });
+add('지원 밖', '평균 단가가 제일 높은 업체', 'refuse', { expected: '업체 간 평균 비교는 지원하지 않으므로 답하지 않아야 함' }, refuse);
 } else if (SET === 'C') {
 const V5 = arTop[1] || arTop[0], apV = apTop[0];
 add('직접 조회', `${dispName(V1)} 아직 못 받은 거 얼마임?`, 'num', { value: arNetByVendor[V1], unit: '원' }, { tol: 0.005, check: numCheck(arNetByVendor[V1], 0.005, true) });
@@ -209,18 +245,19 @@ function numbersIn(text) {
 const stripHtml = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ');
 const tool = Q.map(q => {
   const t0 = process.hrtime.bigint();
-  const r = BM.nl.parse(q.text, nlCtx);
-  let ans = { parsed: !!r, id: r && r.id, headline: '', status: '', error: null, text: '' };
-  if (r && r.unknownVendor) { ans.text = ans.headline = "'" + r.unknownVendor + "'와(과) 일치하는 업체를 찾지 못했습니다. 자료에 없는 업체입니다."; ans.id = r.id; }
-  else if (r) {
-    const run = E.run(S, r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth }, { useEst: true, anchor: null, canEditAnchor: false });
+  const it = E.interpret(S, q.text);
+  let ans = { parsed: it.kind === 'ok', id: it.r && it.r.id, headline: '', status: '', error: null, text: '', refused: it.kind === 'refuse' };
+  if (it.kind === 'refuse') { ans.text = it.reason === 'vendor-not-found' ? it.message : ''; ans.headline = ans.text; ans.refuseReason = it.reason; ans.refuseMessage = it.message; }
+  else {
+    const run = E.runParsed(S, it.r, { useEst: true, anchor: null, canEditAnchor: false });
     if (run.error) ans.error = run.error;
     else { ans.headline = run.answer.headline; ans.status = run.status; ans.text = run.answer.headline + ' ' + run.notes.join(' '); ans.full = run.answer.headline + ' ' + stripHtml(run.answer.body) + ' ' + run.notes.join(' '); }
   }
   ans.ms = Number(process.hrtime.bigint() - t0) / 1e6;
   // 자동 채점: 질문별 check 함수로 답변 전체 글(제목+표+주의)을 확인
   let auto = null;
-  if (q.check) auto = ans.text ? q.check(ans.text) : 0;
+  if (q.refuse) auto = !ans.text || (/이해하지 못|알 수 없|지원하지|정확히 알 수 없|찾지 못/.test(ans.text) && !/\d[\d,]*\s*원/.test(ans.text)) ? 2 : 0;
+  else if (q.check) auto = ans.text ? q.check(ans.text) : (q.refuseOk && ans.refused ? 1 : 0);
   ans.auto = auto;
   return ans;
 });
@@ -261,7 +298,7 @@ const vkey = k => S.m.vendorKey(dispName(k));
 eng.A01 = (S.ar.vendors.filter(v => v.key === vkey(V1))[0] || { balance: 0 }).balance;
 eng.A03 = sum(S.ar.vendors.filter(v => v.balance > 1000), v => v.balance);
 { const ag = BM.aging(S.ar); eng.A04 = ag.d180 + ag.over; }
-eng.A05 = sum(BM.cashRows(S.m).filter(r => r.ym === mFull && r.dr > 0 && r.vk === vkey(V2)), r => r.dr - r.cr);
+eng.A05 = sum(BM.receipts(S.m).filter(r => r.ym === mFull && r.vk === vkey(V2)), r => r.amt);
 eng.A06 = S.pl.filter(b => b.ym === mFull)[0].rev;
 eng.A07 = (BM.expenseByAcct(S.m, mFull)['지급수수료'] || { amt: 0 }).amt;
 eng.A09 = BM.volumes(S.m, vkey(V3), mFull).inKg / 1000;
@@ -270,8 +307,9 @@ const lines = ['정답표 검증: 독립 계산 값과 엔진 분석 함수 값 
 if (SET === 'A') Q.filter(q => q.type === 'num').forEach(q => { const e = eng[q.id]; const idx = Q.indexOf(q); const t = tool[idx]; lines.push(q.id + ' 독립 계산 ' + fmt(q.expected.value) + (q.expected.unit || '') + ' | 엔진 ' + (e == null ? '-' : fmt(e)) + ' | 차이 ' + (e == null ? '-' : fmt(e - q.expected.value)) + ' | 도구 답변 자동 확인: ' + (t.auto === 2 ? '일치' : t.auto === 0 ? '불일치' : '질문을 알아듣지 못함')); });
 fs.writeFileSync(path.join(out, '독립계산_대조.txt'), lines.join('\n') + '\n');
 const tot = tool.reduce((a, t) => a + (t.auto || 0), 0);
+const nWrong = tool.filter((t, i) => (t.auto || 0) === 0 && (t.text || '') !== '' ).length, nRefused = tool.filter(t => !t.text).length;
 const byCat = {}; Q.forEach((q, i) => { const c = byCat[q.cat] = byCat[q.cat] || { s: 0, n: 0 }; c.s += tool[i].auto || 0; c.n++; });
-console.log('세트 ' + SET + ' 도구 자동 채점: ' + Math.round(tot / (2 * Q.length) * 100) + '% (' + tot + '/' + 2 * Q.length + ') | ' + Object.keys(byCat).map(k => k + ' ' + Math.round(byCat[k].s / (2 * byCat[k].n) * 100) + '%').join(' · '));
+console.log('세트 ' + SET + ' [정답 ' + tool.filter(t => t.auto === 2).length + ' · 부분 ' + tool.filter(t => t.auto === 1).length + ' · 답 안 함 ' + nRefused + ' · 틀린 답 ' + nWrong + '] 도구 자동 채점: ' + Math.round(tot / (2 * Q.length) * 100) + '% (' + tot + '/' + 2 * Q.length + ') | ' + Object.keys(byCat).map(k => k + ' ' + Math.round(byCat[k].s / (2 * byCat[k].n) * 100) + '%').join(' · '));
 console.log('만든 파일:', fs.readdirSync(out).join(', '));
 console.log('\n질문별 도구 답변:');
 Q.forEach((q, i) => console.log(q.id, '|', tool[i].parsed ? '해석 ' + tool[i].id + (tool[i].error ? ' 오류:' + tool[i].error : '') : '해석 실패', '| 자동', tool[i].auto, '\n   Q:', q.text, '\n   정답:', expText(q).slice(0, 110), '\n   도구:', (tool[i].headline || tool[i].error || '(이해하지 못했습니다)').slice(0, 170)));

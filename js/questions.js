@@ -42,24 +42,25 @@
 
   /* 2. 업체 돈 들어왔어? */
   Q.push({ id: 'q2', label: '이 업체 이번 달에 돈 들어왔어?', needs: ['vendor?', 'month'], run: function (c) {
-    var r = monthRange(c.month);
-    var rows = BM.cashRows(c.m).filter(function (x) { return x.ym === c.month && x.dr > 0 && x.vk; });
-    var notes = ['분개장 입력 기준입니다. 실제 입금일과 전표 입력일 사이에 시차가 있을 수 있습니다.'];
+    var rows = BM.receipts(c.m).filter(function (x) { return x.ym === c.month && x.vk; });
+    var notes = ['전표 입력 기준입니다. 실제 입금일과 전표 입력일 사이에 시차가 있을 수 있습니다.', '입금은 보통예금·당좌예금이 차변에 오른 전표에서 외상매출금·선수금·매출 등 대변 줄의 거래처로 셉니다. (은행 수수료 차감 전 금액)'];
     if (!c.vk) {
       var by = {};
-      rows.forEach(function (x) { var b = by[x.vk] = by[x.vk] || { amt: 0, n: 0 }; b.amt += x.dr - x.cr; b.n++; });
-      var list = Object.keys(by).map(function (k) { return { k: k, b: by[k] }; }).sort(function (a, b) { return b.b.amt - a.b.amt; }).slice(0, 15);
-      return { headline: BM.ymLabel(c.month) + ' 입금이 확인된 업체 ' + Object.keys(by).length + '곳, 합계 ' + BM.won(BM.sum(list, function (x) { return x.b.amt; })) + ' (상위 15곳).',
-        body: tbl(['업체', '입금 건수', '입금액'], list.map(function (x) { return [esc(c.m.vendorName(x.k)), x.b.n, BM.won(x.b.amt)]; }), [1, 2]), notes: notes };
+      rows.forEach(function (x) { var b = by[x.vk] = by[x.vk] || { amt: 0, n: 0 }; b.amt += x.amt; b.n++; });
+      var list = Object.keys(by).map(function (k) { return { k: k, b: by[k] }; }).sort(function (a, b) { return b.b.amt - a.b.amt; });
+      var tot = BM.sum(list, function (x) { return x.b.amt; });
+      if (!list.length) return { headline: BM.ymLabel(c.month) + ' 입금이 확인된 업체가 없습니다.', body: '', notes: notes };
+      return { headline: BM.ymLabel(c.month) + ' 입금이 확인된 업체 ' + list.length + '곳, 합계 ' + BM.won(tot) + '. 큰 곳: ' + list.slice(0, 3).map(function (x) { return c.m.vendorName(x.k) + ' ' + BM.won(x.b.amt); }).join(', ') + '.',
+        body: tbl(['업체', '입금 건수', '입금액'], list.slice(0, 15).map(function (x) { return [esc(c.m.vendorName(x.k)), x.b.n, BM.won(x.b.amt)]; }), [1, 2]), notes: notes };
     }
-    var mine = rows.filter(function (x) { return x.vk === c.vk; });
+    var mine = rows.filter(function (x) { return x.vk === c.vk; }).sort(function (a, b) { return a.t - b.t; });
     var ar = c.ar.vendors.filter(function (x) { return x.key === c.vk; })[0];
     if (!mine.length) {
       return { headline: c.vname + ': ' + BM.ymLabel(c.month) + ' 입금 기록이 없습니다.' + (ar && ar.open > 0 ? ' 현재 미수금 ' + BM.won(ar.open) + '이 남아 있습니다.' : ''), body: '', notes: notes };
     }
-    var tot = BM.sum(mine, function (x) { return x.dr - x.cr; });
-    return { headline: c.vname + ': ' + BM.ymLabel(c.month) + ' 입금 ' + mine.length + '건, 합계 ' + BM.won(tot) + ' (마지막 입금 ' + mine[mine.length - 1].date + ').' + (ar && ar.open > 0 ? ' 남은 미수금 ' + BM.won(ar.open) + '.' : ''),
-      body: tbl(['일자', '적요', '금액'], mine.map(function (x) { return [x.date, esc(short(x.memo, 50)), BM.won(x.dr - x.cr)]; }), [2]), notes: notes };
+    var tot2 = BM.sum(mine, function (x) { return x.amt; });
+    return { headline: c.vname + ': ' + BM.ymLabel(c.month) + ' 입금 ' + mine.length + '건, 합계 ' + BM.won(tot2) + ' (마지막 입금 ' + mine[mine.length - 1].date + ').' + (ar && ar.open > 0 ? ' 남은 미수금 ' + BM.won(ar.open) + '.' : ''),
+      body: tbl(['일자', '적요', '계정', '금액'], mine.map(function (x) { return [x.date, esc(short(x.memo, 50)), esc(x.acct), BM.won(x.amt)]; }), [3]), notes: notes };
   } });
 
   /* 3. 이번 달 나갈 돈과 들어올 돈 */
@@ -87,7 +88,7 @@
   /* 4. 이 비용은 뭐야 */
   Q.push({ id: 'q4', label: '이 비용은 뭐야?', needs: ['month', 'acct'], run: function (c) {
     var rows = c.m.rows.filter(function (x) {
-      return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.cr > 0 && x.dr === 0);
+      return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.dr === 0 && x.cr !== 0);
     });
     if (!rows.length) return { headline: BM.ymLabel(c.month) + ' ' + c.acct + ' 내역이 없습니다.', body: '', notes: [] };
     var tot = BM.sum(rows, function (x) { return x.dr - x.cr; });
@@ -108,7 +109,7 @@
       var series = c.m.months.slice(Math.max(0, idx - 5), idx + 1).map(function (ym) { var e = BM.expenseByAcct(c.m, ym)[c.acct]; return { ym: ym, a: e ? e.amt : 0 }; });
       var cur = series[series.length - 1].a, bs = series.slice(0, -1).filter(function (x) { return prev.indexOf(x.ym) >= 0; });
       var avg = bs.length ? BM.sum(bs, function (x) { return x.a; }) / bs.length : 0;
-      var rows = c.m.rows.filter(function (x) { return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.cr > 0 && x.dr === 0); })
+      var rows = c.m.rows.filter(function (x) { return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.dr === 0 && x.cr !== 0); })
         .sort(function (a, b) { return Math.abs(b.dr - b.cr) - Math.abs(a.dr - a.cr); }).slice(0, 8);
       return { headline: c.acct + ': ' + BM.ymLabel(c.month) + ' ' + BM.won(cur) + '으로 직전 ' + bs.length + '개월 평균(' + BM.won(avg) + ')보다 ' + BM.won(Math.abs(cur - avg)) + (cur >= avg ? ' 많습니다.' : ' 적습니다.'),
         body: '<h4>월별 추이</h4>' + tbl(['월', '금액'], series.map(function (x) { return [BM.ymLabel(x.ym), BM.won(x.a)]; }), [1]) +
@@ -356,7 +357,7 @@
     list.forEach(function (x) { var s = split(x); due += s.due; over += s.over; });
     return { headline: '미지급금 잔액 합계 ' + BM.won(total) + ' (' + list.length + '개 거래처). 이 중 ' + BM.ymLabel(ym) + ' 도래 추정 ' + BM.won(due) + ', 이미 기한이 지난 추정 ' + BM.won(over) + '. 큰 곳: ' + list.slice(0, 3).map(function (x) { return x.name + ' ' + BM.won(x.open); }).join(', ') + '.',
       body: tbl(['업체', '잔액', BM.ymLabel(ym) + ' 도래(추정)', '기한 경과(추정)', '예상 근거'], list.slice(0, topN).map(function (x) { var s = split(x); return [esc(x.name), BM.won(x.open), BM.won(s.due), BM.won(s.over), esc(x.paySrc)]; }), [1, 2, 3]),
-      notes: ['예정일은 업체마스터 결제기한 또는 과거 결제 이력으로 추정한 값이라 실제 지급 결정과 다를 수 있습니다.', '미지급금에는 카드대금·4대보험 등 거래처가 아닌 항목도 포함됩니다.'].concat(negativeNote(ap)) };
+      notes: ['예정일은 업체마스터 결제기한 또는 과거 결제 이력으로 추정한 값이라 실제 지급 결정과 다를 수 있습니다.', '미지급금 계정만 센 값입니다. 미지급비용(예: 이자 계상분), 예수금(4대보험 등), 차입금은 포함하지 않습니다. 카드대금 등 거래처가 아닌 항목은 포함됩니다.'].concat(negativeNote(ap)) };
   } });
 
   /* 14. 매출 조회 */
@@ -431,6 +432,32 @@
     return { headline: '이 도구는 장부에 기록된 과거 자료를 분석하며 미래 매출은 예측하지 않습니다.' + (avg ? ' 참고로 최근 ' + last.length + '개월(' + last.map(function (b) { return (+b.ym.slice(5)) + '월'; }).join('·') + ') 월평균 매출은 ' + BM.won(avg) + '입니다.' : ''), status: '잠정',
       body: '', notes: ['예측에는 거래처별 계약 물량, 단가 변경, 계절성 같은 가정이 필요하고 이 도구에는 그런 정보가 없습니다. 위 평균은 예측이 아니라 과거 평균입니다.'] };
   } });
+
+
+  /* ---------- 질문 카탈로그: 질문마다 필요한 자료와 계산 정의를 선언한다 ----------
+     새 질문을 추가할 때는 (1) 필요한 자료, (2) 정의, (3) 결과 구분을 반드시 여기에 적고,
+     (4) tools/sweep_verify.js 에 독립 계산 검증을 추가해야 한다. */
+  var META = {
+    q1:  { group: '지급·입금', requires: ['journal'], optional: ['업체마스터(결제기한)'], status: '추정', def: '미지급금 계정의 업체별 미결 잔액(선입선출). 예정일 = 발생일 + (업체마스터 결제기한, 없으면 그 업체의 과거 평균 결제일).' },
+    q2:  { group: '지급·입금', requires: ['journal'], optional: [], status: '잠정', def: '보통예금·당좌예금이 차변에 오른 전표에서, 외상매출금·선수금·미수금·받을어음·부가세예수금·매출 계정의 대변 줄 중 해당 업체·해당 월의 합(은행 수수료 차감 전 금액). 전표 입력일 기준이라 실제 입금일과 다를 수 있음.' },
+    q3:  { group: '지급·입금', requires: ['journal'], optional: ['업체마스터(결제기한)'], status: '추정', def: '외상매출금·미지급금 미결 항목 중 예정일이 해당 월인 금액과 이미 기한이 지난 금액.' },
+    q4:  { group: '비용', requires: ['journal'], optional: [], status: '확정', def: '해당 월 계정과목의 차변-대변 합. 제조·판관비·영업외비용의 (제)(도)(분)(판) 구분은 합산. 결산 대체 줄은 제외.' },
+    q5:  { group: '비용', requires: ['journal'], optional: [], status: '확정', def: '해당 월 비용을 직전 3개월 평균과 비교. 감가상각·퇴직급여·충당부채는 제외.' },
+    q6:  { group: '손익', requires: ['journal'], optional: [], status: '추정', def: '장부 손익, 발생비용 기준 손익, 결산성 비용을 더한 관리용 추정 손익을 연결표로 제시.' },
+    q7:  { group: '비용', requires: ['journal'], optional: [], status: '확정', def: '최근 3개월 월평균 비용 항목 순위. 절감 가능 여부를 판단하지 않음.' },
+    q8:  { group: '손익', requires: ['journal'], optional: ['거래내역(변동비 기준, 권장)'], status: '추정', def: '변동비 = 거래내역의 반출 처리·운반비(없으면 계정 이름으로 추정한 초안). 고정비 = 발생비용 - 변동비 + 결산성 비용 분기 평균 월할. 손익분기 매출 = 고정비 ÷ 공헌이익률.' },
+    q9:  { group: '통장', requires: ['journal'], optional: ['기준일 통장 잔액(입력)'], status: '추정', def: '입력한 기준일 잔액 + 이후 보통예금 증감. 기준 잔액이 없으면 증감만 표시.' },
+    q10: { group: '업체별', requires: ['journal', 'trades'], optional: [], status: '확정', def: '거래내역 월별 가중평균 단가(금액÷수량). 분개장 매출과 월별 대조.' },
+    q11: { group: '업체별', requires: ['journal', 'trades'], optional: [], status: '확정', def: '거래내역 중 처리비 행의 수량 합(kg·톤).' },
+    q12: { group: '미수·미지급', requires: ['journal'], optional: [], status: '확정', def: '외상매출금의 업체별 순잔액(차변-대변). 연령은 청구일(전표일) 기준 선입선출. 마이너스 업체는 기초 잔액 누락으로 보고 제외.' },
+    q13: { group: '미수·미지급', requires: ['journal'], optional: ['업체마스터(결제기한)'], status: '추정', def: '미지급금의 업체별 순잔액. 도래·경과 구분은 결제 이력 기반 추정.' },
+    q14: { group: '매출', requires: ['journal'], optional: ['거래내역(대조)'], status: '잠정', def: '매출 계정(4xx, 매출원가 제외)의 대변-차변 합. 거래내역 매출과 대조.' },
+    q15: { group: '비용', requires: ['journal'], optional: [], status: '잠정', def: '해당 월 제조원가·판관비·영업외비용 합계와 큰 항목 순위.' },
+    q16: { group: '비용', requires: ['journal'], optional: [], status: '잠정', def: '직전 달(또는 지정한 기준 달) 대비 계정별 증가액 순위.' },
+    q17: { group: '점검', requires: ['journal'], optional: ['거래내역(매출 대조)'], status: '확정', def: '차대 불균형 전표, 중복 입력 의심, 수량×단가 불일치, 기초 잔액 누락, 거래내역과의 매출 대조 결과.' },
+    q18: { group: '범위 밖', requires: ['journal'], optional: [], status: '잠정', def: '예측하지 않음. 최근 3개월 평균 매출만 참고로 제시.' }
+  };
+  Q.forEach(function (q) { var m = META[q.id]; if (m) { q.group = m.group; q.requires = m.requires; q.optional = m.optional; q.baseStatus = m.status; q.def = m.def; } });
 
   function tile(l, v, n) { return '<div class="card tile"><div class="label">' + esc(l) + '</div><div class="value">' + v + '</div>' + (n ? '<div class="note">' + esc(n) + '</div>' : '') + '</div>'; }
   BM.fmtAsOf = function (c) { return c.m.asOf + ' 분개장'; };

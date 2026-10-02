@@ -9,7 +9,7 @@
   var curQ = null, chart = null, useEst = true;
   var mode = 'standalone', role = null, dirty = false, serverMeta = null;
   var settings = { anchor: null };
-  var lastVendorText = '', lastMonth = '', extra = {};
+  var lastVendorText = '', lastMonth = '', extra = {}, holding = false, pendingMulti = null;
   var JSON_H = { 'Content-Type': 'application/json' };
 
   /* ---------- 서버 통신 ---------- */
@@ -199,14 +199,18 @@
 
   /* ---------- 질문 ---------- */
   function renderQuestionList() {
-    $('qlist').innerHTML = BM.questions.filter(function (q) { return !q.hidden; }).map(function (q) { return '<button class="qchip' + (curQ && curQ.id === q.id ? ' on' : '') + '" data-q="' + q.id + '">' + esc(q.label) + '</button>'; }).join('');
-    Array.prototype.forEach.call($('qlist').querySelectorAll('button'), function (b) {
+    var av = E.availability(S);
+    $('qlist').innerHTML = BM.questions.filter(function (q) { return !q.hidden; }).map(function (q) {
+      var ok = av[q.id].available;
+      return '<button class="qchip' + (curQ && curQ.id === q.id ? ' on' : '') + (ok ? '' : ' off') + '" data-q="' + q.id + '"' + (ok ? '' : ' disabled title="필요한 자료: ' + esc(av[q.id].missing.join(', ')) + '"') + '>' + esc(q.label) + (ok ? '' : ' <small>(필요: ' + esc(av[q.id].missing.join(', ')) + ')</small>') + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('qlist').querySelectorAll('button:not([disabled])'), function (b) {
       b.addEventListener('click', function () { $('understood').textContent = ''; selectQ(b.getAttribute('data-q'), null, 'chip'); });
     });
   }
 
   /* preset: {vendorText, month, acct} 가 있으면 그 값으로 채우고, 없으면 직전 값을 이어서 쓴다 */
-  function selectQ(id, preset, source) {
+  function selectQ(id, preset, source, hold) {
     curQ = E.question(id);
     renderQuestionList();
     var needs = curQ.needs, h = '';
@@ -225,9 +229,11 @@
     $('params').innerHTML = h;
     if ($('p-acct')) { fillAcct(); if (preset && preset.acct) $('p-acct').value = preset.acct; }
     Array.prototype.forEach.call($('params').querySelectorAll('input,select'), function (el) {
-      el.addEventListener('change', function () { if (el.id === 'p-month' && $('p-acct')) fillAcct(); runQ(); });
+      el.addEventListener('change', function () { if (el.id === 'p-month' && $('p-acct')) fillAcct(); if (!holding) runQ(); });
     });
-    runQ();
+    holding = !!hold;
+    if (hold) $('answer').innerHTML = '<div class="hint">위 내용이 맞으면 "이대로 질문하기"를 누르세요. 틀리면 아래에서 업체·월·항목을 바꾼 뒤 누르세요.</div>';
+    else runQ();
   }
   function fillAcct() {
     var ym = $('p-month').value, e = BM.expenseByAcct(S.m, ym);
@@ -247,10 +253,15 @@
     var res;
     try { res = E.run(S, curQ.id, p, { useEst: useEst, anchor: settings.anchor, canEditAnchor: mode === 'standalone' || role === 'accountant' }); }
     catch (e) { $('answer').innerHTML = '<div class="callout bad">이 질문을 계산하는 중 오류가 났습니다: ' + esc(e.message) + '</div>'; return; }
+    if (res.error === 'missing-data') { $('answer').innerHTML = '<div class="callout warn">' + esc(res.text) + '</div>'; return; }
     if (res.error === 'vendor-required') { $('answer').innerHTML = '<div class="hint">업체를 입력하거나 목록에서 고르세요.</div>'; return; }
     if (res.error === 'acct-required') { $('answer').innerHTML = '<div class="hint">비용 항목을 고르세요.</div>'; return; }
     if (res.error === 'vendor-not-found') { $('answer').innerHTML = '<div class="callout warn">"' + esc(res.text) + '"과(와) 일치하는 업체를 찾지 못했습니다.</div>'; return; }
     if (res.error) { $('answer').innerHTML = '<div class="callout bad">질문을 처리하지 못했습니다.</div>'; return; }
+    showAnswer(res);
+  }
+
+  function showAnswer(res) {
     var cls = res.status === '확정' ? 'fixed' : res.status === '잠정' ? 'prov' : 'est';
     var meta = '<div class="meta"><span class="st ' + cls + '">' + res.status + '</span> 기준일 ' + esc(res.asOf) + ' · 근거: ' + esc(res.source) +
       (res.warnings.length ? '<div class="metawarn">데이터 경고: ' + res.warnings.map(esc).join(' / ') + '</div>' : (res.warnTotal ? '<div class="metanote">데이터 점검 ' + res.warnTotal + '건이 있습니다. 위 요약에서 확인하세요.</div>' : '')) + '</div>';
@@ -259,30 +270,38 @@
     if (res.answer.after) res.answer.after($('answer'), runQ);
   }
 
-  /* 자연어 질문: 문장에서 질문 종류·업체·월·항목을 뽑아 같은 질문 화면으로 연결한다 */
+  /* 자연어 질문: 문장에서 질문 종류·업체·월·항목을 뽑아 같은 질문 화면으로 연결한다.
+     지원하지 않거나 확실하지 않은 질문은 추측하지 않고 답하지 않는다. */
   function ask(text) {
     text = text.trim();
     if (!text || !S) return;
-    var r = BM.nl.parse(text, E.nlContext(S));
-    if (r && r.unknownVendor) {
+    var it = E.interpret(S, text), opt = { useEst: useEst, anchor: settings.anchor, canEditAnchor: mode === 'standalone' || role === 'accountant' };
+    if (it.kind === 'refuse') {
       $('understood').textContent = '';
-      $('answer').innerHTML = '<div class="callout warn">"' + esc(r.unknownVendor) + '"과(와) 일치하는 업체를 찾지 못했습니다. 업체 이름을 다시 확인해 주세요.</div>';
-      logEvent({ type: 'ask', source: 'nl', id: r.id, text: text.slice(0, 200) });
+      $('answer').innerHTML = '<div class="callout warn">' + esc(it.message) + '</div>';
+      logEvent({ type: 'ask', source: 'nl', id: it.r ? it.r.id : null, text: text.slice(0, 200), refused: it.reason });
       return;
     }
-    if (!r) {
-      $('understood').textContent = '';
-      $('answer').innerHTML = '<div class="callout warn">질문을 이해하지 못했습니다. 아래 질문 중에서 고르거나, 업체명과 월을 넣어 다시 물어보세요. (예: "○○환경 이번 달 줄 돈 얼마야?")</div>';
-      logEvent({ type: 'ask', source: 'nl', id: null, text: text.slice(0, 200) });
-      return;
-    }
-    var q = E.question(r.id), parts = [q.label];
-    if (r.vendor) parts.push('업체: ' + r.vendor.name);
+    var r = it.r, q = E.question(r.id), parts = [q.label];
+    if (r.vendors && r.vendors.length > 1) parts.push('업체: ' + r.vendors.map(function (v) { return v.name; }).join(' · '));
+    else if (r.vendor) parts.push('업체: ' + r.vendor.name);
     if (r.month) parts.push('월: ' + BM.ymLabel(r.month));
     if (r.acct) parts.push('항목: ' + r.acct);
-    $('understood').textContent = '이렇게 이해했습니다 → ' + parts.join(' · ') + ' (틀리면 아래에서 바꾸세요)';
     logEvent({ type: 'ask', source: 'nl', id: r.id, text: text.slice(0, 200) });
-    selectQ(r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth }, 'nl');
+    // 문장을 잘못 이해했을 때 틀린 답이 바로 보이지 않도록, 이해한 내용을 먼저 보여 주고 확인을 받은 뒤에 답한다
+    $('understood').innerHTML = esc('이렇게 이해했습니다 → ' + parts.join(' · ')) + ' <button class="small" id="confirm-run" type="button">이대로 질문하기</button>';
+    $('confirm-run').addEventListener('click', function () {
+      $('understood').textContent = '확인한 질문 → ' + parts.join(' · ');
+      if (pendingMulti) { var res = E.runParsed(S, pendingMulti, opt); pendingMulti = null; if (res.error) { $('answer').innerHTML = '<div class="callout warn">' + esc(res.text || '질문을 처리하지 못했습니다.') + '</div>'; return; } showAnswer(res); return; }
+      holding = false; runQ();
+    });
+    if (r.vendors && r.vendors.length > 1) {   // 업체가 여럿이면 각각 계산한 결과를 한 번에 보여준다
+      pendingMulti = r; holding = true; $('params').innerHTML = ''; curQ = q; renderQuestionList();
+      $('answer').innerHTML = '<div class="hint">위 내용이 맞으면 "이대로 질문하기"를 누르세요.</div>';
+      return;
+    }
+    pendingMulti = null;
+    selectQ(r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth }, 'nl', true);
   }
 
   /* ---------- 월별 추이 ---------- */

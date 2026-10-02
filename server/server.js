@@ -227,13 +227,13 @@ async function handleApi(req, res, u) {
   if (p === '/api/ask' && method === 'GET') {
     const q = (u.searchParams.get('q') || '').slice(0, 300), S = getS();
     if (!S) return sendJson(req, res, 200, { understood: false, text: '서버에 저장된 데이터가 없습니다. 경리 담당자가 먼저 파일을 올려야 합니다.' });
-    const r = BM.nl.parse(q, E.nlContext(S));
-    if (!r) { audit('ask', req, role, { source: 'api', id: null, text: q }); return sendJson(req, res, 200, { understood: false, text: '질문을 이해하지 못했습니다. 업체명과 월을 넣어 다시 물어보세요.' }); }
-    if (r.unknownVendor) { audit('ask', req, role, { source: 'api', id: r.id, text: q }); return sendJson(req, res, 200, { understood: true, id: r.id, needs: 'vendor-not-found', text: "'" + r.unknownVendor + "'와(과) 일치하는 업체를 찾지 못했습니다. 업체 이름을 다시 확인해 주세요." }); }
-    const run = E.run(S, r.id, { vendorText: r.vendor ? r.vendor.name : '', month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth }, { useEst: true, anchor: loadSettings().anchor, canEditAnchor: false });
+    const it = E.interpret(S, q);
+    if (it.kind === 'refuse') { audit('ask', req, role, { source: 'api', id: it.r ? it.r.id : null, text: q, refused: it.reason }); return sendJson(req, res, 200, { understood: false, reason: it.reason, text: it.message }); }
+    const r = it.r;
+    const run = E.runParsed(S, r, { useEst: true, anchor: loadSettings().anchor, canEditAnchor: false });
     audit('ask', req, role, { source: 'api', id: r.id, text: q });
     if (run.error) {
-      const msg = { 'vendor-required': '어느 업체인지 알려주세요.', 'vendor-not-found': '일치하는 업체를 찾지 못했습니다.', 'acct-required': '어느 비용 항목인지 알려주세요.' }[run.error] || '질문을 처리하지 못했습니다.';
+      const msg = run.text || { 'vendor-required': '어느 업체인지 알려주세요.', 'vendor-not-found': '일치하는 업체를 찾지 못했습니다.', 'acct-required': '어느 비용 항목인지 알려주세요.' }[run.error] || '질문을 처리하지 못했습니다.';
       return sendJson(req, res, 200, { understood: true, id: r.id, needs: run.error, text: msg });
     }
     return sendJson(req, res, 200, { understood: true, id: r.id, label: run.q.label, vendor: r.vendor ? r.vendor.name : null, month: r.month, acct: r.acct, status: run.status, asOf: run.asOf, headline: run.answer.headline, notes: run.notes, text: E.toText(run) });

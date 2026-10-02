@@ -147,6 +147,33 @@
     return { rows: out, flow: { '반입': '매출', '반출': '비용' }, warn: { badDate: 0, unknownDir: 0 }, converted: true };
   };
 
+
+  /* ---------- ERP 보고서(월별 손익계산서, 월별 제조원가명세서): 계산 검증용 ---------- */
+  var ROMAN = /^[\u2160-\u217F]+\.\s*(.*)$/;
+  BM.isErpReport = function (wb) {
+    var rows = sheetRows(wb.Sheets[wb.SheetNames[0]]).slice(0, 6);
+    return rows.some(function (r) { return norm(r[0]) === '과목' && r.some(function (c) { return /\d{4}\s*년\s*\d{1,2}\s*월/.test(String(c || '')); }); });
+  };
+  BM.parseErpReport = function (wb) {
+    var rows = sheetRows(wb.Sheets[wb.SheetNames[0]]), hi = -1;
+    for (var i = 0; i < Math.min(rows.length, 8); i++) if (norm(rows[i][0]) === '과목') { hi = i; break; }
+    if (hi < 0) return null;
+    var cols = {};
+    rows[hi].forEach(function (c, idx) { var m = /(\d{4})\s*년\s*(\d{1,2})\s*월/.exec(String(c || '')); if (m) cols[m[1] + '-' + ('0' + m[2]).slice(-2)] = idx; });
+    var out = [], group = '';
+    for (var r = hi + 1; r < rows.length; r++) {
+      var name = String(rows[r][0] == null ? '' : rows[r][0]).trim();
+      if (!name) continue;
+      var rm = ROMAN.exec(name), vals = {};
+      Object.keys(cols).forEach(function (k) { vals[k] = BM.num(rows[r][cols[k]]); });
+      if (rm) { group = rm[1].replace(/\s/g, ''); out.push({ header: true, name: group, group: group, vals: vals }); }
+      else out.push({ header: false, name: name, group: group, vals: vals });
+    }
+    var hasRev = out.some(function (x) { return x.header && x.name.indexOf('매출액') >= 0; });
+    var hasCost = out.some(function (x) { return x.header && /노무비|공사원가/.test(x.name); });
+    return { type: hasRev ? 'pl' : hasCost ? 'cost' : 'unknown', rows: out, months: Object.keys(cols).sort() };
+  };
+
   /* ---------- 업체마스터 ---------- */
   BM.isVendorMaster = function (wb) {
     if (wb.SheetNames.indexOf('업체마스터') < 0) return false;

@@ -20,23 +20,39 @@
   function qOf(ym) { return ym.slice(0, 4) + 'Q' + Math.ceil(+ym.slice(5) / 3); }
   function qMonths(q) { var y = q.slice(0, 4), n = +q.slice(5); return [0, 1, 2].map(function (i) { return y + '-' + ('0' + (n * 3 - 2 + i)).slice(-2); }); }
 
-  BM.monthlyPL = function (m) {
-    var by = {};
-    m.months.forEach(function (ym) { by[ym] = { ym: ym, rev: 0, prod: 0, sga: 0, nonopOut: 0, nonopIn: 0, cogsBook: 0, lumpy: 0, lumpyCat: {} }; });
+  /* 계정별 월 금액의 단일 출처. 월별 손익, 비용 조회, ERP 보고서 대조가 모두 이 함수를 쓴다.
+     결산 전표 중 제조원가·판관비 계정의 대변(재공품·원가 대체 줄)은 발생비용이 아니므로 뺀다.
+     반환: { revenue|cogs|prod|sga|nonop_out|nonop_in : { 계정명: { 'YYYY-MM': 금액 } } }
+     금액 부호: 수익은 대변-차변, 비용은 차변-대변 */
+  BM.accountMonthly = function (m) {
+    var out = { revenue: {}, cogs: {}, prod: {}, sga: {}, nonop_out: {}, nonop_in: {} };
     m.rows.forEach(function (r) {
-      var b = by[r.ym], v;
-      switch (r.cls) {
-        case 'revenue': b.rev += r.cr - r.dr; break;
-        case 'cogs': b.cogsBook += r.dr - r.cr; break;
-        case 'prod': case 'sga': case 'nonop_out':
-          // 결산 전표의 제조원가 계정 대변은 재공품 대체이므로 발생비용에서 제외한다
-          v = (r.closing && r.cr > 0 && r.dr === 0 && r.cls !== 'nonop_out') ? 0 : r.dr - r.cr;
-          if (r.cls === 'prod') b.prod += v; else if (r.cls === 'sga') b.sga += v; else b.nonopOut += v;
-          var lc = lumpyCat(r.acct);
-          if (lc) { b.lumpy += v; b.lumpyCat[lc] = (b.lumpyCat[lc] || 0) + v; }
-          break;
-        case 'nonop_in': b.nonopIn += r.cr - r.dr; break;
-      }
+      var o = out[r.cls];
+      if (!o) return;
+      var transfer = r.closing && r.dr === 0 && r.cr !== 0 && (r.cls === 'prod' || r.cls === 'sga');
+      if (transfer) return;
+      var v = (r.cls === 'revenue' || r.cls === 'nonop_in') ? r.cr - r.dr : r.dr - r.cr;
+      var a = o[r.acct] = o[r.acct] || {};
+      a[r.ym] = (a[r.ym] || 0) + v;
+    });
+    return out;
+  };
+
+  BM.monthlyPL = function (m) {
+    var by = {}, acc = BM.accountMonthly(m);
+    m.months.forEach(function (ym) { by[ym] = { ym: ym, rev: 0, prod: 0, sga: 0, nonopOut: 0, nonopIn: 0, cogsBook: 0, lumpy: 0, lumpyCat: {} }; });
+    var field = { revenue: 'rev', cogs: 'cogsBook', prod: 'prod', sga: 'sga', nonop_out: 'nonopOut', nonop_in: 'nonopIn' };
+    Object.keys(field).forEach(function (cls) {
+      Object.keys(acc[cls]).forEach(function (acct) {
+        Object.keys(acc[cls][acct]).forEach(function (ym) {
+          var b = by[ym], v = acc[cls][acct][ym];
+          b[field[cls]] += v;
+          if (cls === 'prod' || cls === 'sga' || cls === 'nonop_out') {
+            var lc = lumpyCat(acct);
+            if (lc) { b.lumpy += v; b.lumpyCat[lc] = (b.lumpyCat[lc] || 0) + v; }
+          }
+        });
+      });
     });
     var list = m.months.map(function (ym) {
       var b = by[ym];
@@ -190,6 +206,25 @@
     return b;
   };
 
+  /* ---------- 입금(수금) ----------
+     고객이 돈을 보내면 전표에는 보통예금 차변(거래처는 은행 계좌)과 외상매출금 등 대변(거래처는 고객)이 함께 입력된다.
+     그래서 입금은 "현금 계정이 차변에 오른 전표의 매출 관련 대변 줄"을 그 거래처의 입금으로 센다. */
+  var RECEIPT_ACCT = /^(외상매출금|선수금|미수금|받을어음|부가세예수금)$/;
+  BM.receipts = function (m) {
+    var groups = {}, out = [];
+    m.rows.forEach(function (r) { var k = r.date + '|' + r.no; (groups[k] = groups[k] || []).push(r); });
+    Object.keys(groups).forEach(function (k) {
+      var g = groups[k];
+      if (!g.some(function (r) { return BM.CASH_ACCTS.test(r.acct) && r.dr > 0; })) return;
+      g.forEach(function (r) {
+        if (BM.CASH_ACCTS.test(r.acct) || !(r.cr > 0 && r.dr === 0)) return;
+        if (!(RECEIPT_ACCT.test(r.acct) || r.cls === 'revenue')) return;
+        out.push({ date: r.date, ym: r.ym, t: r.t, no: r.no, vk: r.vk, vendor: r.vendor, acct: r.acct, amt: r.cr, memo: r.memo });
+      });
+    });
+    return out;
+  };
+
   /* ---------- 현금(통장) ---------- */
   BM.cashRows = function (m) { return m.rows.filter(function (r) { return BM.CASH_ACCTS.test(r.acct); }); };
 
@@ -328,7 +363,7 @@
       var R2 = BM.sum(sel, function (b) { return b.rev; }), V2 = 0;
       m.rows.forEach(function (r) {
         if (!set[r.ym] || (r.cls !== 'prod' && r.cls !== 'sga' && r.cls !== 'nonop_out')) return;
-        if (r.closing && r.cr > 0 && r.dr === 0 && r.cls !== 'nonop_out') return;
+        if (r.closing && r.dr === 0 && r.cr !== 0 && r.cls !== 'nonop_out') return;
         if (VAR_RE.test(r.acct)) V2 += r.dr - r.cr;
       });
       out.mode = 'accounts'; out.R = R2; out.V = V2; out.F = inc - V2;
@@ -362,13 +397,15 @@
 
   /* 비용 분석(4, 5, 7번): 계정/업체별 */
   BM.expenseByAcct = function (m, ym) {
-    var o = {};
-    m.rows.forEach(function (r) {
-      if (r.ym !== ym || (r.cls !== 'prod' && r.cls !== 'sga' && r.cls !== 'nonop_out')) return;
-      if (r.closing && r.cr > 0 && r.dr === 0) return;
-      var k = r.acct.replace(/\((제|도|분|판)\)$/, '');
-      var b = o[k] = o[k] || { name: k, amt: 0, n: 0 };
-      b.amt += r.dr - r.cr; b.n++;
+    var acc = BM.accountMonthly(m), o = {};
+    ['prod', 'sga', 'nonop_out'].forEach(function (cls) {
+      Object.keys(acc[cls]).forEach(function (acct) {
+        var v = acc[cls][acct][ym];
+        if (v == null) return;
+        var k = acct.replace(/\((제|도|분|판)\)$/, '');
+        var b = o[k] = o[k] || { name: k, amt: 0, n: 0 };
+        b.amt += v; b.n++;
+      });
     });
     return o;
   };

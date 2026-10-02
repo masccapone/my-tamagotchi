@@ -47,6 +47,17 @@
     return { vendors: S.vendorKeys.map(function (k) { return { key: k, name: S.m.vendorName(k) }; }), accts: Object.keys(accts), asOf: S.m.asOf, months: S.m.months };
   };
 
+  /* 질문마다 필요한 자료가 올라와 있는지 */
+  var DATA_LABEL = { journal: '분개장', trades: '거래내역' };
+  E.availability = function (S) {
+    var o = {};
+    BM.questions.forEach(function (q) {
+      var miss = [];
+      (q.requires || []).forEach(function (r) { if (r === 'trades' && !S.m.trades) miss.push(DATA_LABEL[r]); });
+      o[q.id] = { available: !miss.length, missing: miss };
+    });
+    return o;
+  };
   E.question = function (id) { return BM.questions.filter(function (q) { return q.id === id; })[0]; };
 
   /* p = { vendorText, month, acct }, opt = { useEst, anchor, canEditAnchor }
@@ -55,6 +66,8 @@
     p = p || {}; opt = opt || {};
     var q = E.question(qid);
     if (!q) return { error: 'unknown-question' };
+    var av = E.availability(S)[qid];
+    if (!av.available) return { error: 'missing-data', q: q, missing: av.missing, text: '이 질문에는 ' + av.missing.join(', ') + ' 파일이 필요합니다.' };
     var needs = q.needs, notes = [];
     var c = { m: S.m, pl: S.pl, ar: S.ar, ap: S.ap, rc: S.rc, bepMonths: S.bepMonths, useEst: opt.useEst !== false, anchor: opt.anchor || null, canEditAnchor: !!opt.canEditAnchor };
     if (needs.indexOf('month') >= 0 || needs.indexOf('month?') >= 0) c.month = p.month || (needs.indexOf('month') >= 0 ? S.m.asOf.slice(0, 7) : null);
@@ -80,6 +93,31 @@
       warnings: ['q6', 'q8', 'q14', 'q17', 'q15', 'q16'].indexOf(qid) >= 0 ? S.rc.warnings.filter(function (w) { return w.lvl === 'bad'; }).slice(0, 2).map(function (w) { return w.t; }) : [],
       warnTotal: S.rc.warnings.length,
       notes: (a.notes || []).concat(notes) };
+  };
+
+  /* 문장 → 해석 결과. 화면, 서버, 시험이 모두 이 함수를 쓴다.
+     { kind: 'refuse', reason, message } 이면 답하지 않는다. { kind: 'ok', r } 이면 E.runParsed 로 실행한다. */
+  E.interpret = function (S, text) {
+    var r = BM.nl.parse(text, E.nlContext(S));
+    if (!r) return { kind: 'refuse', reason: 'unknown', message: '질문을 이해하지 못했습니다. 업체명과 월을 넣어 다시 물어보세요. (예: "○○환경 이번 달 줄 돈 얼마야?")' };
+    if (r.unsupported && r.unsupported.length) return { kind: 'refuse', reason: 'unsupported', r: r, message: '"' + r.unsupported[0].phrase + '"처럼 ' + r.unsupported[0].reason + '은(는) 아직 지원하지 않아 답하지 않았습니다. 틀린 숫자를 드리지 않기 위해서입니다. 월 단위로 물어보세요. (예: "8월 매출")' };
+    if (r.unsure && r.unsure.length) return { kind: 'refuse', reason: 'unsure', r: r, message: '"' + r.unsure.join('", "') + '"이(가) 무슨 뜻인지 정확히 알 수 없어 답하지 않았습니다. 틀린 숫자를 드리지 않기 위해서입니다. 다른 말로 물어보세요. (예: "90일 넘게 못 받은 돈")' };
+    if (r.unknownVendor) return { kind: 'refuse', reason: 'vendor-not-found', r: r, message: '"' + r.unknownVendor + '"과(와) 일치하는 업체를 찾지 못했습니다. 자료에 없는 업체이거나 이름이 다릅니다.' };
+    var av = E.availability(S)[r.id];
+    if (av && !av.available) return { kind: 'refuse', reason: 'missing-data', r: r, message: '이 질문에는 ' + av.missing.join(', ') + ' 파일이 필요합니다. 파일을 올린 뒤 다시 물어보세요.' };
+    return { kind: 'ok', r: r };
+  };
+
+  /* 해석 결과 실행. 업체가 둘 이상이면 각각 계산해 한 줄로 이어 붙인다. */
+  E.runParsed = function (S, r, opt) {
+    var base = { month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth };
+    if (!(r.vendors && r.vendors.length > 1)) return E.run(S, r.id, Object.assign({ vendorText: r.vendor ? r.vendor.name : '' }, base), opt);
+    var runs = r.vendors.slice(0, 4).map(function (v) { return E.run(S, r.id, Object.assign({ vendorText: v.name }, base), opt); });
+    var bad = runs.filter(function (x) { return x.error; })[0];
+    if (bad) return bad;
+    var weakest = runs.some(function (x) { return x.status === '추정'; }) ? '추정' : runs.some(function (x) { return x.status === '잠정'; }) ? '잠정' : '확정';
+    var notes = []; runs.forEach(function (x) { x.notes.forEach(function (n) { if (notes.indexOf(n) < 0) notes.push(n); }); });
+    return { q: runs[0].q, c: runs[0].c, answer: { headline: runs.map(function (x) { return x.answer.headline; }).join(' / '), body: runs.map(function (x) { return x.answer.body || ''; }).join('') }, status: weakest, source: runs[0].source, asOf: runs[0].asOf, warnings: runs[0].warnings, warnTotal: runs[0].warnTotal, notes: notes, multi: true };
   };
 
   /* 메신저(카카오톡 등)로 보낼 짧은 글: 숫자 표는 보내지 않고 한 줄 답과 구분·기준일·주의만 */
