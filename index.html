@@ -98,6 +98,8 @@ ul.notes { margin: 14px 0 0; padding-left: 18px; color: var(--text-muted); font-
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
 th, td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
+table.wide { width: max-content; min-width: 100%; font-size: 12.5px; }
+table.wide td:first-child, table.wide th:first-child { white-space: nowrap; position: sticky; left: 0; background: var(--surface-1); }
 td.r, th.r { text-align: right; white-space: nowrap; }
 .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; margin-right: 4px; }
 .badge.warn { background: var(--warn-bg); color: var(--warn-text); }

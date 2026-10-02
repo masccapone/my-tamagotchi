@@ -465,6 +465,44 @@
     return o;
   };
 
+  /* 손익계산서(기간별): 월별 칸과 누계 칸. 금액은 accountMonthly 한 곳에서 나오므로 월별 손익·ERP 보고서 대조와 같은 숫자다. */
+  BM.incomeStatement = function (m, pl, from, to) {
+    var acc = BM.accountMonthly(m);
+    var months = m.months.filter(function (ym) { return ym >= from && ym <= to; });
+    function section(cls) {
+      var by = {};
+      Object.keys(acc[cls]).forEach(function (a) {
+        var k = BM.acctStrip(a), o = by[k] = by[k] || {};
+        months.forEach(function (ym) { var v = acc[cls][a][ym]; if (v) o[ym] = (o[ym] || 0) + v; });
+      });
+      return Object.keys(by).map(function (k) {
+        var vals = months.map(function (ym) { return by[k][ym] || 0; });
+        return { name: k, vals: vals, total: BM.sum(vals, function (x) { return x; }) };
+      }).filter(function (r) { return r.vals.some(function (x) { return Math.abs(x) >= 1; }); })
+        .sort(function (a, b) { return Math.abs(b.total) - Math.abs(a.total); });
+    }
+    var P = months.map(function (ym) { return pl.filter(function (b) { return b.ym === ym; })[0]; });
+    function arr(f) { return P.map(f); }
+    var o = { months: months, sec: { rev: section('revenue'), cogs: section('cogs'), sga: section('sga'), nIn: section('nonop_in'), nOut: section('nonop_out') } };
+    o.rev = arr(function (b) { return b.rev; }); o.cogs = arr(function (b) { return b.cogsBook; }); o.sga = arr(function (b) { return b.sga; });
+    o.nIn = arr(function (b) { return b.nonopIn; }); o.nOut = arr(function (b) { return b.nonopOut; });
+    o.gross = o.rev.map(function (v, i) { return v - o.cogs[i]; });
+    o.op = o.gross.map(function (v, i) { return v - o.sga[i]; });
+    o.pre = o.op.map(function (v, i) { return v + o.nIn[i] - o.nOut[i]; });
+    o.incurred = arr(function (b) { return b.plIncurred; }); o.est = arr(function (b) { return b.plEst; });
+    o.prod = arr(function (b) { return b.prod; });
+    // 제조원가는 분기 말에 매출원가로 대체되므로, 그 분기 말 달이 기간 안에 없거나 대체 전표가 없으면 '원가 미결산'
+    function qEnd(ym) { var y = ym.slice(0, 4), q = Math.ceil(+ym.slice(5) / 3); return y + '-' + ('0' + q * 3).slice(-2); }
+    o.unsettled = P.filter(function (b) {
+      if (!(b.prod > 0)) return false;
+      var e = qEnd(b.ym), eb = pl.filter(function (x) { return x.ym === e; })[0];
+      return e > to || !eb || !(eb.cogsBook > 0);
+    }).map(function (b) { return b.ym; });
+    o.partial = P.filter(function (b) { return b.flags.some(function (f) { return f.k === 'partial'; }); }).map(function (b) { return b.ym; });
+    o.estAdj = BM.sum(P, function (b) { return b.estAdj; });
+    return o;
+  };
+
   /* BEP·분석에 쓸 기본 기간: 거래내역이 있고 분개장이 마감된 달 */
   BM.defaultMonths = function (m, pl, rc) {
     var recon = {}; (rc.months || []).forEach(function (r) { recon[r.ym] = r; });

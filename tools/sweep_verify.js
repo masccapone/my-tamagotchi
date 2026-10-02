@@ -71,6 +71,16 @@ S.m.months.forEach(ym => {
   check('월별 통장 출금·입금(q19)', ym, hasNum(h, o, 1) && hasNum(h, i, 1), h.slice(0, 80));
   const net = Math.abs(i - o - bank) < 1; check('통장 입출금-잔액증감 항등(q19)', ym, net, '입금-출금 ' + (i - o) + ' vs 증감 ' + bank);
 });
+const revenueOf = ym => sum(rows.filter(r => r.ym === ym && /^4/.test(r.code) && !/원가|손익/.test(r.acct)), r => r.cr - r.dr);
+// 4c) 손익계산서(q20): 매출은 계정코드로 독립 계산, 세전이익은 월별 손익 합계와 대조 (월별 손익은 ERP 보고서와 대조 완료)
+{
+  const yms = S.m.months.filter(ym => ym.startsWith('2026-') && ym <= '2026-09');
+  const rev = sum(yms, ym => revenueOf(ym)), pre = sum(yms, ym => S.pl.filter(b => b.ym === ym)[0].plBook);
+  const h = head(run('q20', { month: '2026-09', from: '2026-01' }));
+  check('손익계산서 누계 매출(q20)', '2026-01~09', hasNum(h, rev, 1), h.slice(0, 80));
+  check('손익계산서 누계 세전이익(q20)', '2026-01~09', hasNum(h, pre, 1), h.slice(0, 80));
+  yms.forEach(ym => { const h1 = head(run('q20', { month: ym, from: ym })); check('손익계산서 월별 매출(q20)', ym, hasNum(h1, revenueOf(ym), 1), h1.slice(0, 60)); });
+}
 // 5) 전체 합계 일관성
 { const tot = sum(arV, v => Math.max(0, arNet(v))), h = head(run('q12', {})); check('미수금 전체 합계(q12)', '전체', hasNum(h, tot, 1), h.slice(0, 70)); }
 console.log('전수 검증 결과 (독립 계산 값이 답변 제목에 그대로 나오는지)\n');

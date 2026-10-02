@@ -3,13 +3,13 @@
   'use strict';
   var BM = g.BM, esc = BM.esc;
 
-  function tbl(head, rows, right) {
+  function tbl(head, rows, right, wide) {
     right = right || [];
     var h = '<tr>' + head.map(function (x, i) { return '<th' + (right.indexOf(i) >= 0 ? ' class="r"' : '') + '>' + esc(x) + '</th>'; }).join('') + '</tr>';
     var b = rows.map(function (r) {
       return '<tr>' + r.map(function (c, i) { return '<td' + (right.indexOf(i) >= 0 ? ' class="r"' : '') + '>' + c + '</td>'; }).join('') + '</tr>';
     }).join('');
-    return '<div class="tablewrap"><table>' + h + b + '</table></div>';
+    return '<div class="tablewrap"><table' + (wide ? ' class="wide"' : '') + '>' + h + b + '</table></div>';
   }
   BM.tbl = tbl;
   function neg(x, text) { return x < 0 ? '<span class="neg">' + text + '</span>' : text; }
@@ -466,6 +466,39 @@
       notes: ['전표일 기준이라 실제 이체일과 다를 수 있습니다. 대출 상환, 외상대금 결제, 보증금 등 비용이 아닌 출금도 포함됩니다.', '"비용"과 다릅니다: 비용은 발생 시점, 이 답은 통장에서 실제로 돈이 움직인 기준입니다.'] };
   } });
 
+  /* 20. 손익계산서 */
+  Q.push({ id: 'q20', label: '[기간]의 손익계산서는? (월별 + 누계)', needs: ['month'], run: function (c) {
+    var to = c.month, from = c.from || (to.slice(0, 4) + '-01');
+    var st = BM.incomeStatement(c.m, c.pl, from, to);
+    if (!st.months.length) return { headline: '해당 기간 분개장 자료가 없습니다.', body: '', notes: [] };
+    var n = st.months.length;
+    function tot(a) { return BM.sum(a, function (x) { return x; }); }
+    var T = { rev: tot(st.rev), cogs: tot(st.cogs), gross: tot(st.gross), sga: tot(st.sga), op: tot(st.op), nIn: tot(st.nIn), nOut: tot(st.nOut), pre: tot(st.pre), inc: tot(st.incurred), est: tot(st.est) };
+    var span = n === 1 ? BM.ymLabel(to) : BM.ymLabel(st.months[0]) + '~' + BM.ymLabel(to) + ' 누계';
+    function num(v, bold) { var t = BM.fmtN(Math.round(v)); if (v < 0) t = '<span class="neg">' + t + '</span>'; return bold ? '<b>' + t + '</b>' : t; }
+    function line(label, vals, bold) { return [bold ? '<b>' + esc(label) + '</b>' : '&nbsp;&nbsp;' + esc(label)].concat(vals.map(function (v) { return num(v, bold); })).concat([num(tot(vals), bold)]); }
+    function lines(rows, limit) {
+      var out = rows.slice(0, limit).map(function (r) { return line(r.name, r.vals, false); });
+      if (rows.length > limit) { var rest = rows.slice(limit); out.push(line('기타 ' + rest.length + '개 항목', st.months.map(function (x, i) { return BM.sum(rest, function (r) { return r.vals[i]; }); }), false)); }
+      return out;
+    }
+    var rows = [line('Ⅰ. 매출액', st.rev, true)].concat(lines(st.sec.rev, 6))
+      .concat([line('Ⅱ. 매출원가', st.cogs, true)]).concat(lines(st.sec.cogs, 4))
+      .concat([line('Ⅲ. 매출총이익', st.gross, true), line('Ⅳ. 판매비와관리비', st.sga, true)]).concat(lines(st.sec.sga, 12))
+      .concat([line('Ⅴ. 영업이익', st.op, true), line('Ⅵ. 영업외수익', st.nIn, true)]).concat(lines(st.sec.nIn, 4))
+      .concat([line('Ⅶ. 영업외비용', st.nOut, true)]).concat(lines(st.sec.nOut, 6))
+      .concat([line('Ⅷ. 법인세차감전순이익 (장부 기준)', st.pre, true), line('참고: 발생비용 기준 손익', st.incurred, false), line('참고: 관리용 추정 손익', st.est, false)]);
+    var head = [''].concat(st.months.map(function (ym) { return n > 1 ? (+ym.slice(5)) + '월' : BM.ymLabel(ym); })).concat(['누계']);
+    var cols = []; for (var i = 1; i <= n + 1; i++) cols.push(i);
+    var notes = [];
+    if (st.unsettled.length) notes.push('매출원가가 아직 결산되지 않은 달: ' + st.unsettled.map(function (ym) { return (+ym.slice(5)) + '월'; }).join('·') + '. 이 달들의 제조원가 발생액(' + BM.won(st.months.reduce(function (a, ym, i) { return a + (st.unsettled.indexOf(ym) >= 0 ? st.prod[i] : 0); }, 0)) + ')은 장부 기준 손익에 아직 들어가지 않아 장부 기준 이익이 실제보다 높게 나옵니다. 발생비용 기준 손익을 같이 보세요.');
+    if (st.partial.length) notes.push(BM.ymLabel(st.partial[0]) + '은 진행 중인 달이라 일부만 입력됐습니다.');
+    if (st.estAdj > 0) notes.push('관리용 추정 손익은 입력되지 않은 결산성 비용(감가상각·퇴직급여·이자 정산 등) 약 ' + BM.won(st.estAdj) + '을 직전 결산 분기 평균으로 추정해 반영한 값입니다.');
+    notes.push('계정별 금액은 분개장 그대로입니다(결산 전표 포함). 제조원가명세서가 아닌 손익계산서 형식이며, 제조원가 계정 [(제)(도)(분)]은 매출원가 결산 전표를 통해서만 이 표에 들어옵니다.');
+    return { headline: span + ' (장부 기준): 매출 ' + BM.won(T.rev) + ', 매출원가 ' + BM.won(T.cogs) + ', 판관비 ' + BM.won(T.sga) + ', 영업외손익 ' + BM.won(T.nIn - T.nOut) + ' → 세전이익 ' + BM.won(T.pre) + '. 발생비용 기준 ' + BM.won(T.inc) + (st.estAdj > 0 ? ', 관리용 추정 ' + BM.won(T.est) : '') + '.' + (st.unsettled.length ? ' ※ 원가 미결산 월이 있어 장부 이익은 높게 나옵니다.' : ''),
+      body: '<div class="hint">단위: 원</div>' + tbl(head, rows, cols, true), notes: notes, status: st.unsettled.length || st.partial.length ? '잠정' : (st.estAdj > 0 ? '추정' : '확정') };
+  } });
+
   /* 18. 범위 밖(예측) 질문: 정직하게 한계를 밝힌다 */
   Q.push({ id: 'q18', hidden: true, label: '앞으로 매출은 어떻게 될까?', needs: [], run: function (c) {
     var last = c.pl.filter(function (b) { return b.rev > 0; }).slice(-4, -1), avg = last.length ? sumBy(last, function (b) { return b.rev; }) / last.length : 0;
@@ -496,6 +529,7 @@
     q16: { group: '비용', requires: ['journal'], optional: [], status: '잠정', def: '직전 달(또는 지정한 기준 달) 대비 계정별 증가액 순위.' },
     q17: { group: '점검', requires: ['journal'], optional: ['거래내역(매출 대조)'], status: '확정', def: '차대 불균형 전표, 중복 입력 의심, 수량×단가 불일치, 기초 잔액 누락, 거래내역과의 매출 대조 결과.' },
     q19: { group: '통장', requires: ['journal'], optional: [], status: '잠정', def: '보통예금·당좌예금(·현금)의 전표별 순증감을 구해 감소한 전표는 출금, 증가한 전표는 입금으로 합산하고, 상대 계정별 순액으로 구성을 나눔. 전표일 기준(실제 이체일과 다를 수 있음). 비용이 아닌 출금(대출 상환, 외상대금 결제)을 포함.' },
+    q20: { group: '손익', requires: ['journal'], optional: [], status: '잠정', def: '분개장 계정별 월 금액(결산 전표 포함)으로 손익계산서 형식(매출-매출원가-판관비-영업외)을 구성하고 월별과 누계를 표시. 매출원가가 결산되지 않은 달이 있으면 장부 이익이 높게 나오므로 발생비용 기준·관리용 추정 손익을 참고로 함께 표시.' },
     q18: { group: '범위 밖', requires: ['journal'], optional: [], status: '잠정', def: '예측하지 않음. 최근 3개월 평균 매출만 참고로 제시.' }
   };
   Q.forEach(function (q) { var m = META[q.id]; if (m) { q.group = m.group; q.requires = m.requires; q.optional = m.optional; q.baseStatus = m.status; q.def = m.def; } });

@@ -87,6 +87,7 @@
     var f = {};
     f.forecast = /(예측|전망|내년|내후년|향후|앞으로|다음\s*분기|다음\s*해|나올\s*(거|것)|예상\s*매출)/.test(t);
     f.bep = /(BEP|본전|손익\s*분기|적자\s*(안|면|를\s*면|탈출|벗어)|흑자.{0,6}(전환|되려|나려)|이익.{0,6}전환|매출.{0,14}(더|얼마).{0,8}(필요|해야|돼야|되어야|는\s*돼))/i.test(t);
+    f.stmt = /(손익\s*계산서|재무\s*제표|\bP\s*\/?\s*L\b)/i.test(t);
     f.cash = /(통장|계좌|잔고|보유\s*현금|현금.{0,6}(얼마|있|보유)|은행.{0,8}(돈|얼마|잔))/.test(t);
     f.neg = /(마이너스|음수)/.test(t);
     f.check = /(맞지\s*않|안\s*맞|어긋|오류|잘못|이상한|이상\s*없|누락|빠진|제대로|맞는\s*거|맞아|점검|검증|입력\s*안|틀린|틀렸|오타|실수)/.test(t);
@@ -153,9 +154,11 @@
         UNSUPPORTED.forEach(function (u) { var mm = u[0].exec(ut); if (mm) unsupported.push({ phrase: mm[0], reason: u[1] }); });
       }
       var days = findDays(rt), topN = findTopN(rt);
+      var from = null;
 
       if (f.forecast) id = 'q18';
       else if (f.bep) id = 'q8';
+      else if (f.stmt) id = 'q20';
       else if (f.cash) id = 'q9';
       else if (f.ap && f.neg) { id = 'q13'; view = 'negative'; }
       else if (f.check) { id = 'q17'; if (f.rev || /매출/.test(text)) focus = 'revenue'; }
@@ -183,6 +186,20 @@
       else if (f.profit) id = 'q6';
       else if (acct) id = 'q4';
       if (id === 'q4' && !acct) id = 'q15';
+      if (id === 'q20') {
+        // 기간 표현(N월까지, A월부터 B월까지, 올해, 누계)은 손익계산서에서만 지원한다. 상반기·분기·작년 등은 계속 거절한다.
+        var ut2 = text.replace(/\d{1,2}\s*월\s*(부터|까지)|올해|금년|누계|누적|연초|지금까지/g, ' ');
+        unsupported = []; UNSUPPORTED.forEach(function (u) { var mm = u[0].exec(ut2); if (mm) unsupported.push({ phrase: mm[0], reason: u[1] }); });
+        var asYm = ctx.asOf.slice(0, 7), prevYm = (function () { var y = +asYm.slice(0, 4), mo = +asYm.slice(5); return mo === 1 ? (y - 1) + '-12' : y + '-' + ('0' + (mo - 1)).slice(-2); })();
+        var lastFull = +ctx.asOf.slice(8) < 25 ? prevYm : asYm, r1, r2;
+        if ((r1 = /(\d{1,2})\s*월\s*부터\s*(\d{1,2})\s*월\s*까지/.exec(text))) {
+          month = findMonth(r1[2] + '월', ctx);
+          from = month.slice(0, 4) + '-' + ('0' + r1[1]).slice(-2);
+          if (from > month) from = (+month.slice(0, 4) - 1) + from.slice(4);
+        } else if ((r2 = /(\d{1,2})\s*월\s*까지/.exec(text))) { month = findMonth(r2[1] + '월', ctx); from = month.slice(0, 4) + '-01'; }
+        else if (month && !/(올해|금년|누계|누적|연초|지금까지)/.test(text)) from = month;
+        else { if (!month) month = lastFull; from = month.slice(0, 4) + '-01'; }
+      }
       if (!id) return null;
       if (id === 'q19' && vendor) unsupported.push({ phrase: vendor.name, reason: '업체별 통장 출금' });
 
@@ -204,7 +221,7 @@
       if (id === 'q4' && !acct) ambiguous.push('비용 항목');
       var baseMonth = null;
       if (id === 'q16') { var ms = []; var rg = /(\d{1,2})\s*월/g, mm; while ((mm = rg.exec(text))) { if (+mm[1] >= 1 && +mm[1] <= 12) ms.push(findMonth(mm[1] + '월', ctx)); } if (ms.length > 1) baseMonth = ms.slice().sort()[0]; }
-      return { id: id, vendor: unknown ? null : vendor, unknownVendor: unknown, month: month, baseMonth: baseMonth, acct: acct, days: days, topN: topN, view: view, focus: focus, ambiguous: ambiguous, unsure: unsure, unsupported: unsupported, vendors: vendors.length > 1 ? vendors : null, hits: [] };
+      return { id: id, vendor: unknown ? null : vendor, unknownVendor: unknown, month: month, baseMonth: baseMonth, from: from, acct: acct, days: days, topN: topN, view: view, focus: focus, ambiguous: ambiguous, unsure: unsure, unsupported: unsupported, vendors: vendors.length > 1 ? vendors : null, hits: [] };
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
