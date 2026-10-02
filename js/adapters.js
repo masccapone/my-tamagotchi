@@ -98,6 +98,55 @@
     return { rows: out, flow: flow, warn: warn };
   };
 
+
+  /* ---------- 반입/반출 현황 (현장 장부) → 거래내역 ----------
+     월별 시트(4월, 5월 …)에 반입(거래처·반입량·단가·매출금액)과 반출(거래처·품목·반출량·단가·비용)이
+     한 줄에 나란히 있고, 처리비 줄 아래에 운반비 줄이 따로 붙는 형식을 한 행 한 거래로 풀어 쓴다. */
+  BM.isStatusBook = function (wb) {
+    var ms = wb.SheetNames.filter(function (n) { return /^\d{1,2}월$/.test(n.trim()); });
+    if (!ms.length) return false;
+    var rows = sheetRows(wb.Sheets[ms[0]]).slice(0, 4);
+    var txt = rows.map(function (r) { return r.map(norm).join('|'); }).join('|');
+    return txt.indexOf('반입') >= 0 && txt.indexOf('반출') >= 0 && txt.indexOf('거래처') >= 0;
+  };
+
+  BM.parseStatusBook = function (wb) {
+    var out = [];
+    function isNum(x) { return typeof x === 'number' && isFinite(x); }
+    function push(d, dir, vendor, item, qty, unit, kind, price, amt) {
+      out.push({ date: d.iso, t: d.t, ym: d.ym, dir: dir, flow: dir === '반입' ? '매출' : '비용', vendor: vendor, billTo: vendor,
+        item: item || '', qty: qty, unit: unit, kind: kind, price: price, amt: amt });
+    }
+    wb.SheetNames.filter(function (n) { return /^\d{1,2}월$/.test(n.trim()); }).forEach(function (name) {
+      var rows = sheetRows(wb.Sheets[name]);
+      var cur = null, li = '', lo = '', lkgi = 0, lkgo = 0;
+      for (var r = 3; r < rows.length; r++) {
+        var row = rows[r].concat([null, null, null, null, null, null, null, null, null, null, null, null]);
+        var d0 = BM.parseDate(row[0]);
+        if (d0) cur = d0;
+        var b = String(row[1] == null ? '' : row[1]), g = String(row[6] == null ? '' : row[6]);
+        if (/소\s*계|합\s*계/.test(b) || /소\s*계|합\s*계/.test(g) || !cur) continue;
+        if (row[1]) li = String(row[1]).trim();
+        var kind = String(row[3] == null ? '' : row[3]), kg = isNum(row[2]) ? row[2] : 0, price = isNum(row[4]) ? row[4] : 0, amt = isNum(row[5]) ? row[5] : null;
+        if (kind && amt !== null && li) {
+          if (kind.indexOf('처리') >= 0 && kg) { lkgi = kg; push(cur, '반입', li, '', kg, 'kg', '처리비', price || amt / kg, amt); }
+          else if (kind.indexOf('운') >= 0 && lkgi) push(cur, '반입', li, '', lkgi, 'kg', '운반비', price || amt / lkgi, amt);
+        }
+        var ko = String(row[9] == null ? '' : row[9]), kgo = isNum(row[8]) ? row[8] : 0, po = isNum(row[10]) ? row[10] : 0, ao = isNum(row[11]) ? row[11] : null;
+        if (row[6]) lo = String(row[6]).trim();
+        if (ko && ao !== null && lo) {
+          if (ko.indexOf('처리') >= 0 && kgo) { lkgo = kgo; push(cur, '반출', lo, row[7] == null ? '' : String(row[7]).trim(), kgo, 'kg', '처리비', po, ao); }
+          else if (ko.indexOf('운') >= 0) {
+            if (ko.indexOf('회당') >= 0) push(cur, '반출', '운반-' + lo, '', 1, '회', '운반비', ao, ao);
+            else if (lkgo) push(cur, '반출', '운반-' + lo, '', lkgo, 'kg', '운반비', ao / lkgo, ao);
+          }
+        }
+        if (kgo) lkgo = kgo;
+      }
+    });
+    return { rows: out, flow: { '반입': '매출', '반출': '비용' }, warn: { badDate: 0, unknownDir: 0 }, converted: true };
+  };
+
   /* ---------- 업체마스터 ---------- */
   BM.isVendorMaster = function (wb) {
     if (wb.SheetNames.indexOf('업체마스터') < 0) return false;
@@ -123,6 +172,7 @@
     return file.arrayBuffer().then(function (buf) {
       var wb = XLSX.read(buf, { type: 'array', cellDates: true });
       if (BM.isTrades(wb)) return { kind: 'trades', data: BM.parseTrades(wb), vendors: BM.isVendorMaster(wb) ? BM.parseVendorMaster(wb) : null };
+      if (BM.isStatusBook(wb)) return { kind: 'trades', data: BM.parseStatusBook(wb) };
       if (BM.isVendorMaster(wb) && wb.SheetNames.indexOf('거래내역') < 0) return { kind: 'vendors', data: BM.parseVendorMaster(wb) };
       if (BM.isJournal(wb)) return { kind: 'journal', data: BM.parseJournal(wb) };
       return { kind: null };

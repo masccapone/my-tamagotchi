@@ -17,6 +17,7 @@
       var bad = res.filter(function (r) { return !r.kind || !r.data; });
       res.forEach(function (r) {
         if (!r.kind || !r.data) return;
+        if (r.data.converted) r.name += ' (현황→거래내역 변환 ' + r.data.rows.length.toLocaleString('ko-KR') + '건)';
         files = files.filter(function (x) { return x.name !== r.name; });
         files.push(r);
         if (r.kind === 'trades' && r.vendors) files.push({ name: r.name + ' (업체마스터)', kind: 'vendors', data: r.vendors });
