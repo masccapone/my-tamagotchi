@@ -88,7 +88,8 @@
     f.forecast = /(예측|전망|내년|내후년|향후|앞으로|다음\s*분기|다음\s*해|나올\s*(거|것)|예상\s*매출)/.test(t);
     f.bep = /(BEP|본전|손익\s*분기|적자\s*(안|면|를\s*면|탈출|벗어)|흑자.{0,6}(전환|되려|나려)|이익.{0,6}전환|매출.{0,14}(더|얼마).{0,8}(필요|해야|돼야|되어야|는\s*돼))/i.test(t);
     f.stmt = /(손익\s*계산서|재무\s*제표|\bP\s*\/?\s*L\b)/i.test(t);
-    f.margin = /(이익\s*[률율]|마진|수익\s*[률율]|영업이익\s*[률율])/.test(t);
+    f.margin = /(이익\s*[률율]|마진|수익\s*[률율])/.test(t);
+    f.opmargin = /(영업\s*이익\s*[률율]|세전\s*이익\s*[률율]|순\s*이익\s*[률율])/.test(t);
     f.cash = /(통장|계좌|잔고|보유\s*현금|현금.{0,6}(얼마|있|보유)|은행.{0,8}(돈|얼마|잔))/.test(t);
     f.neg = /(마이너스|음수)/.test(t);
     f.check = /(맞지\s*않|안\s*맞|어긋|오류|잘못|이상한|이상\s*없|누락|빠진|제대로|맞는\s*거|맞아|점검|검증|입력\s*안|틀린|틀렸|오타|실수)/.test(t);
@@ -160,7 +161,7 @@
       if (f.forecast) id = 'q18';
       else if (f.bep) id = 'q8';
       else if (f.stmt) id = 'q20';
-      else if (f.margin) id = 'q21';
+      else if (f.opmargin || f.margin) id = 'q21';
       else if (f.cash) id = 'q9';
       else if (f.ap && f.neg) { id = 'q13'; view = 'negative'; }
       else if (f.check) { id = 'q17'; if (f.rev || /매출/.test(text)) focus = 'revenue'; }
@@ -192,6 +193,7 @@
         // 기간 표현(N월까지, A월부터 B월까지, 올해, 누계)은 손익계산서에서만 지원한다. 상반기·분기·작년 등은 계속 거절한다.
         var ut2 = text.replace(/\d{1,2}\s*월\s*(부터|까지)|올해|금년|누계|누적|연초|지금까지/g, ' ');
         unsupported = []; UNSUPPORTED.forEach(function (u) { var mm = u[0].exec(ut2); if (mm) unsupported.push({ phrase: mm[0], reason: u[1] }); });
+        if (f.opmargin) unsupported.push({ phrase: '영업이익률·세전이익률', reason: '매출총이익률(매출이익률) 외의 이익률' });
         var asYm = ctx.asOf.slice(0, 7), prevYm = (function () { var y = +asYm.slice(0, 4), mo = +asYm.slice(5); return mo === 1 ? (y - 1) + '-12' : y + '-' + ('0' + (mo - 1)).slice(-2); })();
         var lastFull = +ctx.asOf.slice(8) < 25 ? prevYm : asYm, r1, r2;
         if ((r1 = /(\d{1,2})\s*월\s*부터\s*(\d{1,2})\s*월\s*까지/.exec(text))) {

@@ -499,37 +499,54 @@
       body: '<div class="hint">단위: 원</div>' + tbl(head, rows, cols, true), notes: notes, status: st.unsettled.length || st.partial.length ? '잠정' : (st.estAdj > 0 ? '추정' : '확정') };
   } });
 
-  /* 21. 이익률 */
-  Q.push({ id: 'q21', label: '[기간]의 매출총이익률·영업이익률·세전이익률은?', needs: ['month'], run: function (c) {
-    var to = c.month, from = c.from || (to.slice(0, 4) + '-01');
+  /* 21. 매출이익률(매출총이익률) */
+  Q.push({ id: 'q21', label: '[기간]의 매출이익률(매출총이익률)은?', needs: ['month'], run: function (c) {
+    var to = c.month, from = c.from || (to.slice(0, 4) + '-01'), widened = [];
+    // 결산은 분기 단위로만 이뤄지므로, 이미 결산된 분기에 걸친 기간은 그 분기 전체로 넓혀 계산한다
+    function qStart(ym) { return ym.slice(0, 4) + '-' + ('0' + (Math.ceil(+ym.slice(5) / 3) * 3 - 2)).slice(-2); }
+    function qEndYm(ym) { return ym.slice(0, 4) + '-' + ('0' + (Math.ceil(+ym.slice(5) / 3) * 3)).slice(-2); }
+    function settledQ(ym) { var e = qEndYm(ym), b = c.pl.filter(function (x) { return x.ym === e; })[0]; return !!(b && b.cogsBook > 0); }
+    if (settledQ(from) && qStart(from) < from) { widened.push(BM.ymLabel(from) + '→' + BM.ymLabel(qStart(from))); from = qStart(from); }
+    if (settledQ(to) && qEndYm(to) > to) { widened.push(BM.ymLabel(to) + '→' + BM.ymLabel(qEndYm(to))); to = qEndYm(to); }
     var st = BM.incomeStatement(c.m, c.pl, from, to), n = st.months.length;
     if (!n) return { headline: '해당 기간 분개장 자료가 없습니다.', body: '', notes: [] };
-    function sumIdx(a, idx) { return idx.reduce(function (t, i) { return t + a[i]; }, 0); }
     function pct(x, r) { return r > 0 ? (x / r * 100).toFixed(1) + '%' : '-'; }
     function inQ(ym) { var y = ym.slice(0, 4), q = Math.ceil(+ym.slice(5) / 3), k = 0; for (var i = 1; i <= 3; i++) if (st.months.indexOf(y + '-' + ('0' + (q * 3 - 3 + i)).slice(-2)) >= 0) k++; return k === 3; }
-    var all = st.months.map(function (x, i) { return i; });
-    var ok = all.filter(function (i) { return st.unsettled.indexOf(st.months[i]) < 0 && inQ(st.months[i]) && st.rev[i] > 0; });
-    var okLabel = ok.length ? (+st.months[ok[0]].slice(5)) + '~' + (+st.months[ok[ok.length - 1]].slice(5)) + '월' : '';
-    function cols(idx, book) {
-      var R = sumIdx(st.rev, idx);
-      return book ? [BM.won(R), pct(sumIdx(st.gross, idx), R), pct(sumIdx(st.op, idx), R), pct(sumIdx(st.pre, idx), R), pct(sumIdx(st.incurred, idx), R)]
-        : [BM.won(R), '원가 미결산', '원가 미결산', '원가 미결산', pct(sumIdx(st.incurred, idx), R)];
-    }
-    var rows = all.map(function (i) {
-      var settled = ok.indexOf(i) >= 0;
-      return [BM.ymLabel(st.months[i])].concat(cols([i], settled));
+    var info = st.months.map(function (ym, i) {
+      var book = st.unsettled.indexOf(ym) < 0 && inQ(ym);
+      var cost = book ? st.cogs[i] : st.prod[i] + st.estAdjProd[i];
+      return { i: i, ym: ym, rev: st.rev[i], cost: cost, book: book, adj: book ? 0 : st.estAdjProd[i] };
     });
-    if (ok.length) rows.push(['<b>결산 완료 구간 합계 (' + okLabel + ')</b>'].concat(cols(ok, true)));
-    rows.push(['<b>전체 기간 합계</b>'].concat(cols(all, ok.length === n)));
-    var bookHead = ok.length ? '결산 완료 구간(' + (c.from || from).slice(0, 4) + '년 ' + okLabel + ') 장부 기준: 매출총이익률 ' + pct(sumIdx(st.gross, ok), sumIdx(st.rev, ok)) + ', 영업이익률 ' + pct(sumIdx(st.op, ok), sumIdx(st.rev, ok)) + ', 세전이익률 ' + pct(sumIdx(st.pre, ok), sumIdx(st.rev, ok)) + '.' : '선택한 기간에 결산이 끝난 분기 전체가 들어 있지 않아 장부 기준 이익률을 구할 수 없습니다. 제조원가가 분기 말에 몰아서 매출원가로 넘어가기 때문입니다. 분기 전체로 물어보세요. (예: "4월부터 6월까지 이익률")';
-    var R = sumIdx(st.rev, all);
-    var head = bookHead + (ok.length < n ? ' ' + (n > 1 ? '전체 기간(' + BM.ymLabel(st.months[0]) + '~' + BM.ymLabel(to) + ')' : BM.ymLabel(to)) + ' 발생비용 기준 세전이익률은 ' + pct(sumIdx(st.incurred, all), R) + '입니다.' : '');
-    var notes = ['매출총이익률 = (매출-매출원가)÷매출, 영업이익률 = (매출총이익-판관비)÷매출, 세전이익률 = 세전이익÷매출. 모두 장부(손익계산서) 기준이며 매출은 분개장 입력액입니다.',
-      '제조원가는 분기 말에만 매출원가로 대체되므로 분기가 결산되지 않은 달의 장부 이익률은 의미가 없어 "원가 미결산"으로 표시했습니다. 발생비용 기준은 그 달 실제 발생한 비용으로 구한 세전이익률입니다.'];
+    function agg(list) { var R = BM.sum(list, function (x) { return x.rev; }), C = BM.sum(list, function (x) { return x.cost; }); return { R: R, C: C, gp: R - C, m: pct(R - C, R) }; }
+    var B = info.filter(function (x) { return x.book && x.rev > 0; }), E = info.filter(function (x) { return !x.book && x.rev > 0; }), A = info.filter(function (x) { return x.rev > 0; });
+    function span(list) { return list.length ? (list.length === 1 ? (+list[0].ym.slice(5)) + '월' : (+list[0].ym.slice(5)) + '~' + (+list[list.length - 1].ym.slice(5)) + '월') : ''; }
+    var rows = info.map(function (x) {
+      return [BM.ymLabel(x.ym), BM.won(x.rev), BM.won(x.cost), x.rev > 0 ? pct(x.rev - x.cost, x.rev) : '-', x.book ? '<span class="st fixed">장부(결산 완료)</span>' : '<span class="st est">추정</span>'];
+    });
+    var bAgg = agg(B), eAgg = agg(E), aAgg = agg(A);
+    if (B.length) rows.push(['<b>결산 완료 합계 (' + span(B) + ')</b>', BM.won(bAgg.R), BM.won(bAgg.C), '<b>' + bAgg.m + '</b>', '장부']);
+    if (E.length) rows.push(['<b>결산 전 합계 (' + span(E) + ')</b>', BM.won(eAgg.R), BM.won(eAgg.C), '<b>' + eAgg.m + '</b>', '추정']);
+    if (B.length && E.length) rows.push(['<b>전체 합계</b>', BM.won(aAgg.R), BM.won(aAgg.C), '<b>' + aAgg.m + '</b>', '장부+추정']);
+    var parts = [];
+    if (B.length) parts.push('결산 완료 ' + span(B) + ' 장부 기준 매출총이익률 ' + bAgg.m + ' (매출 ' + BM.won(bAgg.R) + ', 매출원가 ' + BM.won(bAgg.C) + ')');
+    if (E.length) parts.push('결산 전 ' + span(E) + '은 발생 제조원가로 추정한 매출총이익률 ' + eAgg.m + ' (매출 ' + BM.won(eAgg.R) + ', 추정 매출원가 ' + BM.won(eAgg.C) + ')');
+    var head = (widened.length ? '(원가는 분기 단위로 결산되어 분기 전체로 계산) ' : '') + (parts.length ? parts.join('. ') + '.' : '이 기간은 매출이 없어 이익률을 계산할 수 없습니다.') + (B.length && E.length ? ' 전체 ' + aAgg.m + '.' : '');
+    // 역검증: 결산이 끝난 분기에서 "발생 제조원가"가 실제 장부 매출원가와 얼마나 달랐는가
+    var qs = {};
+    c.pl.forEach(function (b) { var k = BM.qOf(b.ym), o = qs[k] = qs[k] || { rev: 0, prod: 0, cogs: 0 }; o.rev += b.rev; o.prod += b.prod; o.cogs += b.cogsBook; });
+    var bt = Object.keys(qs).sort().filter(function (k) { return qs[k].cogs > 0 && qs[k].rev > 0; }).map(function (k) { var o = qs[k]; return k.replace('Q', '년 ') + '분기 원가 ' + (((o.prod - o.cogs) / o.cogs) * 100 >= 0 ? '+' : '') + (((o.prod - o.cogs) / o.cogs) * 100).toFixed(1) + '%(이익률 ' + (((o.cogs - o.prod) / o.rev) * 100).toFixed(1) + '%p)'; });
+    var notes = (widened.length ? ['매출원가는 분기 단위로 결산되어 이미 결산된 분기는 분기 전체로 넓혀 계산했습니다(' + widened.join(', ') + ').'] : []).concat(['매출총이익률 = (매출-매출원가)÷매출. 매출은 분개장 입력액입니다.',
+      '제조원가는 분기 말에만 매출원가로 대체됩니다. 결산 전 달은 그 달 발생 제조원가(감가상각 등 분기 말 비용이 아직 입력되지 않았으면 직전 결산 분기 평균으로 추정한 몫 포함)를 매출원가로 보고 계산했습니다.']);
+    if (bt.length) notes.push('이 추정 방식을 이미 결산된 분기에 적용해 보면 실제 장부 매출원가와 다음만큼 차이가 났습니다: ' + bt.join(', ') + '. 결산된 분기가 ' + bt.length + '개뿐이라 오차의 신뢰 범위는 좁게 봐야 합니다.');
+    var adj = BM.sum(E, function (x) { return x.adj; });
+    if (adj > 0) notes.push('결산 전 원가에는 아직 입력되지 않은 결산성 제조원가 약 ' + BM.won(adj) + '의 추정이 들어 있습니다.');
     if (st.partial.length) notes.push(BM.ymLabel(st.partial[0]) + '은 진행 중인 달입니다.');
-    var badRev = st.months.filter(function (ym, i) { return st.rev[i] <= 0; });
-    if (badRev.length) notes.push('매출이 없거나 마이너스인 달(' + badRev.map(BM.ymLabel).join(', ') + ')은 이익률을 계산하지 않았습니다.');
-    return { headline: head, body: '<div class="hint">단위: 원 · 이익률은 매출 대비</div>' + tbl(['기간', '매출', '매출총이익률', '영업이익률', '세전이익률(장부)', '세전이익률(발생비용 기준)'], rows, [1, 2, 3, 4, 5]), notes: notes, status: '잠정' };
+    var low = info.filter(function (x) { return x.rev > 0 && x.rev < 0.3 * (aAgg.R / Math.max(1, A.length)); });
+    if (low.length) notes.push('매출이 평소보다 매우 적은 달(' + low.map(function (x) { return BM.ymLabel(x.ym); }).join(', ') + ')은 매출이 덜 입력됐을 수 있어 그 달 이익률이 낮게 나올 수 있습니다.');
+    if (!B.length && n === 1) notes.push('한 달만 물으면 분기 말 비용이 그 달에 몰려 있을 수 있습니다. 분기 전체로 보려면 "4월부터 6월까지 매출이익률"처럼 물어보세요.');
+    return { headline: head,
+      body: '<div class="hint">단위: 원</div>' + tbl(['기간', '매출', '매출원가', '매출총이익률', '구분'], rows, [1, 2, 3]),
+      notes: notes, status: E.length ? '추정' : (st.partial.length ? '잠정' : '확정') };
   } });
 
   /* 18. 범위 밖(예측) 질문: 정직하게 한계를 밝힌다 */
@@ -563,7 +580,7 @@
     q17: { group: '점검', requires: ['journal'], optional: ['거래내역(매출 대조)'], status: '확정', def: '차대 불균형 전표, 중복 입력 의심, 수량×단가 불일치, 기초 잔액 누락, 거래내역과의 매출 대조 결과.' },
     q19: { group: '통장', requires: ['journal'], optional: [], status: '잠정', def: '보통예금·당좌예금(·현금)의 전표별 순증감을 구해 감소한 전표는 출금, 증가한 전표는 입금으로 합산하고, 상대 계정별 순액으로 구성을 나눔. 전표일 기준(실제 이체일과 다를 수 있음). 비용이 아닌 출금(대출 상환, 외상대금 결제)을 포함.' },
     q20: { group: '손익', requires: ['journal'], optional: [], status: '잠정', def: '분개장 계정별 월 금액(결산 전표 포함)으로 손익계산서 형식(매출-매출원가-판관비-영업외)을 구성하고 월별과 누계를 표시. 매출원가가 결산되지 않은 달이 있으면 장부 이익이 높게 나오므로 발생비용 기준·관리용 추정 손익을 참고로 함께 표시.' },
-    q21: { group: '손익', requires: ['journal'], optional: [], status: '잠정', def: '매출총이익률=(매출-매출원가)÷매출, 영업이익률=(매출총이익-판관비)÷매출, 세전이익률=세전이익÷매출(모두 장부 기준, 매출원가가 결산된 분기만). 결산되지 않은 달은 장부 이익률을 구하지 않고 발생비용 기준 세전이익률만 표시.' },
+    q21: { group: '손익', requires: ['journal'], optional: [], status: '추정', def: '매출이익률=매출총이익률=(매출-매출원가)÷매출. 결산이 끝난 분기는 장부 매출원가, 결산 전 달은 그 달 발생 제조원가(+아직 입력되지 않은 결산성 제조원가의 직전 결산 분기 평균 추정)를 매출원가로 대용. 결산된 분기에 같은 방식을 적용한 오차를 함께 표시.' },
     q18: { group: '범위 밖', requires: ['journal'], optional: [], status: '잠정', def: '예측하지 않음. 최근 3개월 평균 매출만 참고로 제시.' }
   };
   Q.forEach(function (q) { var m = META[q.id]; if (m) { q.group = m.group; q.requires = m.requires; q.optional = m.optional; q.baseStatus = m.status; q.def = m.def; } });

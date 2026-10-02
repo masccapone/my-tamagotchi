@@ -40,7 +40,7 @@
 
   BM.monthlyPL = function (m) {
     var by = {}, acc = BM.accountMonthly(m);
-    m.months.forEach(function (ym) { by[ym] = { ym: ym, rev: 0, prod: 0, sga: 0, nonopOut: 0, nonopIn: 0, cogsBook: 0, lumpy: 0, lumpyCat: {} }; });
+    m.months.forEach(function (ym) { by[ym] = { ym: ym, rev: 0, prod: 0, sga: 0, nonopOut: 0, nonopIn: 0, cogsBook: 0, lumpy: 0, lumpyCat: {}, lumpyProdCat: {}, estAdjProd: 0 }; });
     var field = { revenue: 'rev', cogs: 'cogsBook', prod: 'prod', sga: 'sga', nonop_out: 'nonopOut', nonop_in: 'nonopIn' };
     Object.keys(field).forEach(function (cls) {
       Object.keys(acc[cls]).forEach(function (acct) {
@@ -49,7 +49,7 @@
           b[field[cls]] += v;
           if (cls === 'prod' || cls === 'sga' || cls === 'nonop_out') {
             var lc = lumpyCat(acct);
-            if (lc) { b.lumpy += v; b.lumpyCat[lc] = (b.lumpyCat[lc] || 0) + v; }
+            if (lc) { b.lumpy += v; b.lumpyCat[lc] = (b.lumpyCat[lc] || 0) + v; if (cls === 'prod') b.lumpyProdCat[lc] = (b.lumpyProdCat[lc] || 0) + v; }
           }
         });
       });
@@ -83,8 +83,9 @@
   function estimateSettlement(m, list) {
     var q = {};
     list.forEach(function (b) {
-      var k = qOf(b.ym), o = q[k] = q[k] || { q: k, tot: {}, dep: 0 };
+      var k = qOf(b.ym), o = q[k] = q[k] || { q: k, tot: {}, totP: {}, dep: 0 };
       Object.keys(b.lumpyCat).forEach(function (c) { o.tot[c] = (o.tot[c] || 0) + b.lumpyCat[c]; });
+      Object.keys(b.lumpyProdCat).forEach(function (c) { o.totP[c] = (o.totP[c] || 0) + b.lumpyProdCat[c]; });
       o.dep = o.tot['감가상각'] || 0;
     });
     var qs = Object.keys(q).sort();
@@ -92,8 +93,8 @@
     var out = { available: false, basis: [], quarters: [], perQuarter: {}, perQuarterTotal: 0, backtest: null, confidence: { '이자비용': '낮음' } };
     if (!settled.length) return out;
     var basis = settled.slice(-2);
-    var avg = {};
-    basis.forEach(function (k) { Object.keys(q[k].tot).forEach(function (c) { avg[c] = (avg[c] || 0) + q[k].tot[c] / basis.length; }); });
+    var avg = {}, avgP = {};
+    basis.forEach(function (k) { Object.keys(q[k].tot).forEach(function (c) { avg[c] = (avg[c] || 0) + q[k].tot[c] / basis.length; }); Object.keys(q[k].totP).forEach(function (c) { avgP[c] = (avgP[c] || 0) + q[k].totP[c] / basis.length; }); });
     out.available = true; out.basis = basis; out.perQuarter = avg;
     out.perQuarterTotal = BM.sum(Object.keys(avg), function (c) { return avg[c]; });
 
@@ -123,8 +124,11 @@
       });
       if (tot <= 0) return;
       var ms = qMonths(k).filter(function (ym) { return by(list, ym); });
+      var missP = 0;   // 위 추정 중 제조원가 계정에 들어갈 몫(이자비용 제외)
+      Object.keys(avgP).forEach(function (c) { if (c !== '이자비용') missP += Math.max(0, avgP[c] * frac - (q[k].totP[c] || 0)); });
       ms.forEach(function (ym) {
         var b = by(list, ym);
+        b.estAdjProd = missP / ms.length;
         b.estAdj = tot / ms.length; b.estAdjLow = lo / ms.length; b.estAdjHigh = hi / ms.length;
         b.plEst = b.plIncurred - b.estAdj; b.plEstLow = b.plIncurred - b.estAdjHigh; b.plEstHigh = b.plIncurred - b.estAdjLow;
       });
@@ -490,7 +494,7 @@
     o.op = o.gross.map(function (v, i) { return v - o.sga[i]; });
     o.pre = o.op.map(function (v, i) { return v + o.nIn[i] - o.nOut[i]; });
     o.incurred = arr(function (b) { return b.plIncurred; }); o.est = arr(function (b) { return b.plEst; });
-    o.prod = arr(function (b) { return b.prod; });
+    o.prod = arr(function (b) { return b.prod; }); o.estAdjProd = arr(function (b) { return b.estAdjProd || 0; });
     // 제조원가는 분기 말에 매출원가로 대체되므로, 그 분기 말 달이 기간 안에 없거나 대체 전표가 없으면 '원가 미결산'
     function qEnd(ym) { var y = ym.slice(0, 4), q = Math.ceil(+ym.slice(5) / 3); return y + '-' + ('0' + q * 3).slice(-2); }
     o.unsettled = P.filter(function (b) {

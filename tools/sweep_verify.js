@@ -88,7 +88,6 @@ const revenueOf = ym => sum(rows.filter(r => r.ym === ym && /^4/.test(r.code) &&
   const pre = sum(yms, ym => S.pl.filter(b => b.ym === ym)[0].plBook);
   const h = head(run('q21', { month: '2026-06', from: '2026-04' }));
   check('매출총이익률(q21)', '2026Q2', h.includes(((rev - cogs) / rev * 100).toFixed(1) + '%'), h.slice(0, 90));
-  check('세전이익률(q21)', '2026Q2', h.includes((pre / rev * 100).toFixed(1) + '%'), h.slice(0, 90));
 }
 // 5) 전체 합계 일관성
 { const tot = sum(arV, v => Math.max(0, arNet(v))), h = head(run('q12', {})); check('미수금 전체 합계(q12)', '전체', hasNum(h, tot, 1), h.slice(0, 70)); }
