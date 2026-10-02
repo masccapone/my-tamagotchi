@@ -308,7 +308,11 @@
     var v = BM.volumes(c.m, c.vk, c.month), idx = c.m.months.indexOf(c.month);
     var prev = idx > 0 ? BM.volumes(c.m, c.vk, c.m.months[idx - 1]) : null;
     var hist = c.m.months.slice(Math.max(0, idx - 5), idx + 1).map(function (ym) { var x = BM.volumes(c.m, c.vk, ym); return [BM.ymLabel(ym), ton(x.inKg), ton(x.outKg), x.n]; });
-    return { headline: c.vname + ' ' + BM.ymLabel(c.month) + ' 반입 ' + ton(v.inKg) + ' (' + v.n + '건)' + (prev && prev.inKg ? ', 전월 ' + ton(prev.inKg) + ' 대비 ' + ((v.inKg / prev.inKg - 1) * 100).toFixed(0) + '%' : '') + '.',
+    var parts = [];
+    if (v.inKg) parts.push('반입 ' + ton(v.inKg));
+    if (v.outKg) parts.push('반출 ' + ton(v.outKg));
+    var chg = prev && prev.inKg && v.inKg ? ', 전월 반입 ' + ton(prev.inKg) + ' 대비 ' + ((v.inKg / prev.inKg - 1) * 100).toFixed(0) + '%' : (prev && prev.outKg && v.outKg ? ', 전월 반출 ' + ton(prev.outKg) + ' 대비 ' + ((v.outKg / prev.outKg - 1) * 100).toFixed(0) + '%' : '');
+    return { headline: c.vname + ' ' + BM.ymLabel(c.month) + ' ' + (parts.length ? parts.join(', ') + ' (' + v.n + '건)' + chg : '처리 물량 기록이 없습니다(운반비 행은 수량을 세지 않습니다)') + '.',
       body: tbl(['월', '반입', '반출', '건수'], hist, [1, 2, 3]), notes: [] };
   } });
 

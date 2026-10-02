@@ -113,6 +113,7 @@
     if (!r) return { kind: 'refuse', reason: 'unknown', message: '질문을 이해하지 못했습니다. 업체명과 월을 넣어 다시 물어보세요. (예: "○○환경 이번 달 줄 돈 얼마야?")' };
     if (r.unsupported && r.unsupported.length) return { kind: 'refuse', reason: 'unsupported', r: r, message: '"' + r.unsupported[0].phrase + '"처럼 ' + r.unsupported[0].reason + '은(는) 아직 지원하지 않아 답하지 않았습니다. 틀린 숫자를 드리지 않기 위해서입니다. 월 단위로 물어보세요. (예: "8월 매출")' };
     if (r.unsure && r.unsure.length) return { kind: 'refuse', reason: 'unsure', r: r, message: '"' + r.unsure.join('", "') + '"이(가) 무슨 뜻인지 정확히 알 수 없어 답하지 않았습니다. 틀린 숫자를 드리지 않기 위해서입니다. 다른 말로 물어보세요. (예: "90일 넘게 못 받은 돈")' };
+    if (r.ambiguous && r.ambiguous.indexOf('업체가 여러 곳') >= 0) return { kind: 'refuse', reason: 'vendor-many', r: r, message: '이름이 비슷한 업체가 ' + r.vendor.many.length + '곳입니다(' + r.vendor.many.slice(0, 6).map(function (v) { return v.name; }).join(', ') + '). 정확한 이름으로 다시 물어보세요.' };
     if (r.unknownVendor) return { kind: 'refuse', reason: 'vendor-not-found', r: r, message: '"' + r.unknownVendor + '"과(와) 일치하는 업체를 찾지 못했습니다. 자료에 없는 업체이거나 이름이 다릅니다.' };
     var av = E.availability(S)[r.id];
     if (av && !av.available) return { kind: 'refuse', reason: 'missing-data', r: r, message: '이 질문에는 ' + av.missing.join(', ') + ' 파일이 필요합니다. 파일을 올린 뒤 다시 물어보세요.' };

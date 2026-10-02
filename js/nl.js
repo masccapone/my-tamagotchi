@@ -46,7 +46,7 @@
       else if (score === bestScore && score > 0) best.push(v);
     });
     if (!best.length) return null;
-    return { key: best[0].key, name: best[0].name, many: best.length > 1 ? best.slice(0, 5) : null };
+    return { key: best[0].key, name: best[0].name, many: best.length > 1 ? best : null };
   }
 
   /* 아직 지원하지 않는 조건: 이런 말이 있으면 월 단위 숫자를 대신 답하지 않고 거절한다 */
@@ -190,6 +190,8 @@
       var vendorUsed = ['q1', 'q2', 'q10', 'q11', 'q12', 'q13', 'q14'].indexOf(id) >= 0;
       var unknown = vendorUsed ? unknownVendorPhrase(text, vendor, needsVendor) : null;
       var vendors = vendorUsed ? findVendors(text, ctx) : [];
+      // 이름이 같은 점수로 여러 업체와 겹치면(예: 처리업체와 '운반-' 업체) 한 곳을 고르지 않고 모두 보여준다
+      if (vendorUsed && vendors.length < 2 && vendor && vendor.many) vendors = vendor.many;
       if (unknown && /^(이번|지난|전체|우리|회사|올해)/.test(unknown)) unknown = null;
       // 조건처럼 보이는데 읽지 못한 말이 있으면 추측해서 답하지 않는다
       var unsure = [];
@@ -198,7 +200,7 @@
       if (['q4', 'q15'].indexOf(id) >= 0 && !acct) { var w = /([가-힣]{2,}(?:세|료|값|금))(?![가-힣])/.exec(rt); if (w && !/(미수금|미지급금|보증금)/.test(w[1])) unsure.push(w[1]); }
       var ambiguous = [];
       if (needsVendor && !vendor && !unknown) ambiguous.push('업체');
-      if (vendor && vendor.many) ambiguous.push('업체가 여러 곳');
+      if (vendor && vendor.many && vendor.many.length > 4) ambiguous.push('업체가 여러 곳');
       if (id === 'q4' && !acct) ambiguous.push('비용 항목');
       var baseMonth = null;
       if (id === 'q16') { var ms = []; var rg = /(\d{1,2})\s*월/g, mm; while ((mm = rg.exec(text))) { if (+mm[1] >= 1 && +mm[1] <= 12) ms.push(findMonth(mm[1] + '월', ctx)); } if (ms.length > 1) baseMonth = ms.slice().sort()[0]; }
