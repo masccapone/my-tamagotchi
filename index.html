@@ -102,6 +102,10 @@ td.r, th.r { text-align: right; white-space: nowrap; }
 .badge.warn { background: var(--warn-bg); color: var(--warn-text); }
 .badge.bad { background: var(--bad-bg); color: var(--bad-text); }
 .neg { color: var(--bad-text); }
+.estbox { margin: 8px 0 0; font-size: 14px; color: var(--text-secondary); }
+.estbox details { margin-top: 4px; }
+.estbox details summary { margin: 0; font-weight: 400; font-size: 13px; color: var(--text-muted); }
+.estbox details div { margin-top: 4px; font-size: 13px; }
 .chartbox { position: relative; height: 260px; }
 .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
@@ -144,7 +148,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 28px 0 12px; }
     <details open>
       <summary>월별 추이</summary>
       <div class="card">
-        <div class="legend"><span><i style="background:var(--series-1)"></i>매출</span><span><i style="background:var(--series-2)"></i>발생비용</span></div>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>매출</span><span><i style="background:var(--series-2)"></i>발생비용</span><span><i style="background:var(--series-2);opacity:.45"></i>결산 예상 추가(추정)</span></div>
         <div class="chartbox"><canvas id="chart" role="img" aria-label="월별 매출과 발생비용 막대 차트"></canvas></div>
         <div id="trendtbl" style="margin-top:12px"></div>
       </div>

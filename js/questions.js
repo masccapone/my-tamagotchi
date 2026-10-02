@@ -130,16 +130,26 @@
   Q.push({ id: 'q6', label: '이번 달 이익(손실)이 얼마야?', needs: ['month'], run: function (c) {
     var b = c.pl.filter(function (x) { return x.ym === c.month; })[0];
     if (!b) return { headline: '해당 월 데이터가 없습니다.', body: '', notes: [] };
-    var notes = [];
+    var notes = [], useEst = c.useEst !== false && b.estAdj > 0;
     b.flags.forEach(function (f) {
-      if (f.k === 'cogs') notes.push('이 달은 손익계산서의 매출원가가 아직 결산되지 않아 "손익계산서 기준" 손익이 실제보다 좋게 보입니다. 발생비용 기준을 보세요.');
+      if (f.k === 'cogs') notes.push('이 달은 손익계산서의 매출원가가 아직 결산되지 않아 "손익계산서 기준" 손익이 실제보다 좋게 보입니다.');
       if (f.k === 'drop') notes.push('이 달 매출이 다른 달에 비해 매우 적습니다. 매출 전표가 아직 다 입력되지 않았을 수 있습니다.');
       if (f.k === 'partial') notes.push('아직 진행 중인 달이라 숫자가 확정이 아닙니다.');
     });
+    var estTable = '';
+    if (useEst) {
+      var eq = (c.pl.estimate.quarters || []).filter(function (x) { return x.q === BM.qOf(c.month); })[0];
+      notes.push('"결산 예상"은 분기 말에 입력되는 결산성 비용이 아직 없는 분기를 직전 결산 분기(' + c.pl.estimate.basis.map(function (x) { return x.replace('Q', '년 ') + '분기'; }).join(', ') + ') 평균으로 추정해 그 분기의 달에 균등하게 나눈 값입니다. 실제 결산 전표가 입력되면 자동으로 확정 숫자로 바뀝니다.');
+      if (eq) estTable = '<h4>결산 예상 조정 내역 (' + eq.q.replace('Q', '년 ') + '분기, 추정)</h4>' + tbl(['항목', '직전 결산 분기 평균', '이미 반영', '예상 추가'], Object.keys(eq.missing).map(function (k) {
+        return [esc(k), BM.won(c.pl.estimate.perQuarter[k] || 0), BM.won(eq.booked[k] || 0), BM.won(eq.missing[k])];
+      }), [1, 2, 3]);
+    }
+    var shown = c.useEst !== false ? b.plEst : b.plIncurred;
     var last = c.pl.slice(-7);
-    return { headline: BM.ymLabel(c.month) + ' 손익: 발생비용 기준 ' + BM.won(b.plIncurred) + ', 손익계산서 기준 ' + BM.won(b.plBook) + '.',
-      body: '<div class="tiles">' + tile('매출', BM.won(b.rev)) + tile('발생비용', BM.won(b.incurred), '제조원가 ' + BM.eok(b.prod) + ' · 판관비 ' + BM.eok(b.sga) + ' · 영업외 ' + BM.eok(b.nonopOut)) + tile('손익(발생비용 기준)', neg(b.plIncurred, BM.won(b.plIncurred))) + '</div>' +
-        '<h4>최근 월별</h4>' + tbl(['월', '매출', '발생비용', '손익(발생기준)', '손익(계산서)', '점검'], last.map(function (x) { return [BM.ymLabel(x.ym), BM.won(x.rev), BM.won(x.incurred), neg(x.plIncurred, BM.won(x.plIncurred)), neg(x.plBook, BM.won(x.plBook)), x.flags.map(function (f) { return '<span class="badge warn">' + esc(f.t) + '</span>'; }).join('')]; }), [1, 2, 3, 4]),
+    var head = BM.ymLabel(c.month) + ' 손익: ' + (useEst ? '결산 예상 반영 약 ' + BM.won(b.plEst) + ' (추정), 결산성 비용 제외 발생비용 기준 ' + BM.won(b.plIncurred) : '발생비용 기준 ' + BM.won(b.plIncurred)) + ', 손익계산서 기준 ' + BM.won(b.plBook) + '.';
+    return { headline: head,
+      body: '<div class="tiles">' + tile('매출', BM.won(b.rev)) + tile('발생비용', BM.won(b.incurred), '제조원가 ' + BM.eok(b.prod) + ' · 판관비 ' + BM.eok(b.sga) + ' · 영업외 ' + BM.eok(b.nonopOut)) + tile(useEst ? '손익(결산 예상 반영, 추정)' : '손익(발생비용 기준)', neg(shown, BM.won(shown))) + '</div>' + estTable +
+        '<h4>최근 월별</h4>' + tbl(['월', '매출', '발생비용', '손익(발생기준)', '손익(결산 예상)', '손익(계산서)', '점검'], last.map(function (x) { return [BM.ymLabel(x.ym), BM.won(x.rev), BM.won(x.incurred), neg(x.plIncurred, BM.won(x.plIncurred)), neg(x.plEst, BM.won(x.plEst)), neg(x.plBook, BM.won(x.plBook)), x.flags.map(function (f) { return '<span class="badge warn">' + esc(f.t) + '</span>'; }).join('')]; }), [1, 2, 3, 4, 5]),
       notes: notes };
   } });
 
@@ -160,7 +170,7 @@
 
   /* 8. BEP */
   Q.push({ id: 'q8', label: '이익으로 전환하려면 매출이 얼마나 더 필요해?', needs: [], run: function (c) {
-    var b = BM.bep(c.m, c.pl, c.bepMonths);
+    var b = BM.bep(c.m, c.pl, c.bepMonths, c.useEst);
     var n = b.n || 1;
     if (!b.n || b.R <= 0) return { headline: '손익분기를 계산할 기간 데이터가 부족합니다.', body: '', notes: b.notes };
     var notes = b.notes.slice();

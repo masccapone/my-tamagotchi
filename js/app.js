@@ -6,7 +6,7 @@
 
   var files = [];                 // {name, kind, data}
   var S = null;                   // 현재 분석 상태
-  var curQ = null, chart = null;
+  var curQ = null, chart = null, useEst = true;
 
   /* ---------- 업로드 ---------- */
   function handleFiles(list) {
@@ -65,15 +65,31 @@
     var arOpen = BM.sum(ar.vendors, function (v) { return v.open; }), apOpen = BM.sum(ap.vendors, function (v) { return v.open; });
     var ag = BM.aging(ar), over90 = ag.d180 + ag.over;
     var last = S.bepMonths.length ? S.pl.filter(function (b) { return b.ym === S.bepMonths[S.bepMonths.length - 1]; })[0] : null;
+    var est = S.pl.estimate, hasEst = est && est.available && est.quarters.length;
+    var lastVal = last ? (useEst ? last.plEst : last.plIncurred) : 0;
     var tiles = [
       tile('매출채권 잔액', BM.eok(arOpen), '90일 초과 ' + BM.eok(over90) + ' · ' + ar.vendors.filter(function (v) { return v.open > 0; }).length + '개 업체'),
       tile('미지급금 잔액', BM.eok(apOpen), ap.vendors.filter(function (v) { return v.open > 0; }).length + '개 거래처 · 카드대금 등 포함'),
-      last ? tile(BM.ymLabel(last.ym) + ' 손익 (발생비용 기준)', '<span class="' + (last.plIncurred < 0 ? 'neg' : '') + '">' + BM.eok(last.plIncurred) + '</span>', '마감이 확인된 가장 최근 달') : ''
+      last ? tile(BM.ymLabel(last.ym) + ' 손익' + (useEst && last.estAdj > 0 ? ' (결산 예상 반영)' : ' (발생비용 기준)'), '<span class="' + (lastVal < 0 ? 'neg' : '') + '">' + BM.eok(lastVal) + '</span>', last.estAdj > 0 && useEst ? '추정치 · 결산성 비용 ' + BM.eok(last.estAdj) + ' 포함' : '마감이 확인된 가장 최근 달') : ''
     ].join('');
+    var estBox = '';
+    if (hasEst) {
+      estBox = '<div class="estbox"><label><input type="checkbox" id="use-est"' + (useEst ? ' checked' : '') + '> 결산 예상 조정 반영 (추정)</label>' +
+        '<details><summary>어떻게 추정했나요?</summary><div>분기 말에만 입력되는 감가상각·퇴직급여·충당부채·주식보상·이자 정산 비용은 ' +
+        est.basis.map(function (x) { return x.replace('Q', '년 ') + '분기'; }).join(', ') + ' 평균(분기 ' + BM.eok(est.perQuarterTotal) + ')으로 추정합니다. ' +
+        est.quarters.map(function (x) { return x.q.replace('Q', '년 ') + '분기는 ' + (x.frac >= 0.99 ? '' : '경과분 ') + BM.eok(x.total) + ' 추가 (' + Object.keys(x.missing).map(function (k) { return k + ' ' + BM.eok(x.missing[k]); }).join(', ') + ')'; }).join('. ') +
+        '. 3분기 중 신규 설비 완공 등으로 실제 감가상각이 달라지면 오차가 생깁니다. 결산 전표가 분개장에 들어오면 자동으로 실제 값으로 대체됩니다.</div></details></div>';
+    }
     var w = S.rc.warnings.map(function (x) { return '<li class="' + x.lvl + '">' + esc(x.t) + '</li>'; }).join('');
     $('summary').innerHTML = '<div class="asof">기준일: <b>' + m.asOf + '</b> (분개장 마지막 전표일). 이 날짜 이후의 입금·지급은 반영되지 않았습니다.</div>' +
-      '<div class="tiles">' + tiles + '</div>' +
+      '<div class="tiles">' + tiles + '</div>' + estBox +
       (w ? '<div class="callout warn"><b>데이터 점검 ' + S.rc.warnings.length + '건</b><ul class="wl">' + w + '</ul></div>' : '<div class="callout ok">데이터 점검에서 발견된 문제가 없습니다.</div>');
+    bindEst();
+  }
+  function bindEst() {
+    var cb = $('use-est');
+    if (!cb) return;
+    cb.addEventListener('change', function () { useEst = cb.checked; renderSummary(); renderTrend(); if (curQ) runQ(); });
   }
   function tile(l, v, n) { return '<div class="card tile"><div class="label">' + esc(l) + '</div><div class="value">' + v + '</div>' + (n ? '<div class="note">' + esc(n) + '</div>' : '') + '</div>'; }
 
@@ -151,20 +167,23 @@
   function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
   function renderTrend() {
     var rows = S.pl.filter(function (b) { return b.rev !== 0 || b.incurred > 1e6; }).slice(-12);
-    $('trendtbl').innerHTML = BM.tbl(['월', '매출', '발생비용', '손익(발생기준)', '손익(계산서)', '점검'], rows.map(function (b) {
-      return [BM.ymLabel(b.ym), BM.won(b.rev), BM.won(b.incurred), '<span class="' + (b.plIncurred < 0 ? 'neg' : '') + '">' + BM.won(b.plIncurred) + '</span>', '<span class="' + (b.plBook < 0 ? 'neg' : '') + '">' + BM.won(b.plBook) + '</span>',
+    $('trendtbl').innerHTML = BM.tbl(['월', '매출', '발생비용', '손익(발생기준)', '손익(결산 예상)', '손익(계산서)', '점검'], rows.map(function (b) {
+      var cls = function (v) { return v < 0 ? 'neg' : ''; };
+      return [BM.ymLabel(b.ym), BM.won(b.rev), BM.won(b.incurred), '<span class="' + cls(b.plIncurred) + '">' + BM.won(b.plIncurred) + '</span>',
+        '<span class="' + cls(b.plEst) + '">' + (b.estAdj > 0 ? BM.won(b.plEst) : '-') + '</span>', '<span class="' + cls(b.plBook) + '">' + BM.won(b.plBook) + '</span>',
         b.flags.map(function (f) { return '<span class="badge warn">' + esc(f.t) + '</span>'; }).join('')];
-    }), [1, 2, 3, 4]);
+    }), [1, 2, 3, 4, 5]);
     if (!g.Chart) return;
     if (chart) chart.destroy();
     var txt = cssVar('--text-secondary'), grid = cssVar('--grid');
     chart = new Chart($('chart').getContext('2d'), {
       type: 'bar',
       data: { labels: rows.map(function (b) { return b.ym.slice(2).replace('-', '.'); }), datasets: [
-        { label: '매출', data: rows.map(function (b) { return Math.round(b.rev / 1e6); }), backgroundColor: cssVar('--series-1'), borderRadius: 4, maxBarThickness: 26 },
-        { label: '발생비용', data: rows.map(function (b) { return Math.round(b.incurred / 1e6); }), backgroundColor: cssVar('--series-2'), borderRadius: 4, maxBarThickness: 26 }] },
+        { label: '매출', stack: 'rev', data: rows.map(function (b) { return Math.round(b.rev / 1e6); }), backgroundColor: cssVar('--series-1'), borderRadius: 4, maxBarThickness: 26 },
+        { label: '발생비용', stack: 'cost', data: rows.map(function (b) { return Math.round(b.incurred / 1e6); }), backgroundColor: cssVar('--series-2'), borderRadius: 4, maxBarThickness: 26 },
+        { label: '결산 예상 추가(추정)', stack: 'cost', data: rows.map(function (b) { return useEst ? Math.round(b.estAdj / 1e6) : 0; }), backgroundColor: cssVar('--series-2') + '73', borderRadius: 4, maxBarThickness: 26 }] },
       options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + c.parsed.y.toLocaleString('ko-KR') + '백만원'; } } } },
-        scales: { x: { grid: { display: false }, ticks: { color: txt } }, y: { grid: { color: grid }, ticks: { color: txt, callback: function (v) { return v.toLocaleString('ko-KR'); } }, title: { display: true, text: '백만원', color: txt } } } }
+        scales: { x: { stacked: true, grid: { display: false }, ticks: { color: txt } }, y: { stacked: true, grid: { color: grid }, ticks: { color: txt, callback: function (v) { return v.toLocaleString('ko-KR'); } }, title: { display: true, text: '백만원', color: txt } } } }
     });
   }
 

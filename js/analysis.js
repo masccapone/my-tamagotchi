@@ -6,19 +6,35 @@
   function monthKeys(m) { return m.months; }
 
   /* ---------- 월별 손익 ---------- */
+  var LUMPY = [
+    ['감가상각', /감가상각/],
+    ['퇴직급여', /퇴직급여/],
+    ['충당부채전입', /충당부채전입/],
+    ['주식보상비용', /주식보상/],
+    ['이자비용', /^이자비용$/]
+  ];
+  function lumpyCat(acct) {
+    for (var i = 0; i < LUMPY.length; i++) if (LUMPY[i][1].test(acct)) return LUMPY[i][0];
+    return null;
+  }
+  function qOf(ym) { return ym.slice(0, 4) + 'Q' + Math.ceil(+ym.slice(5) / 3); }
+  function qMonths(q) { var y = q.slice(0, 4), n = +q.slice(5); return [0, 1, 2].map(function (i) { return y + '-' + ('0' + (n * 3 - 2 + i)).slice(-2); }); }
+
   BM.monthlyPL = function (m) {
     var by = {};
-    m.months.forEach(function (ym) { by[ym] = { ym: ym, rev: 0, prod: 0, sga: 0, nonopOut: 0, nonopIn: 0, cogsBook: 0 }; });
+    m.months.forEach(function (ym) { by[ym] = { ym: ym, rev: 0, prod: 0, sga: 0, nonopOut: 0, nonopIn: 0, cogsBook: 0, lumpy: 0, lumpyCat: {} }; });
     m.rows.forEach(function (r) {
-      var b = by[r.ym];
+      var b = by[r.ym], v;
       switch (r.cls) {
         case 'revenue': b.rev += r.cr - r.dr; break;
         case 'cogs': b.cogsBook += r.dr - r.cr; break;
-        case 'prod':
+        case 'prod': case 'sga': case 'nonop_out':
           // 결산 전표의 제조원가 계정 대변은 재공품 대체이므로 발생비용에서 제외한다
-          b.prod += (r.closing && r.cr > 0 && r.dr === 0) ? 0 : r.dr - r.cr; break;
-        case 'sga': b.sga += (r.closing && r.cr > 0 && r.dr === 0) ? 0 : r.dr - r.cr; break;
-        case 'nonop_out': b.nonopOut += r.dr - r.cr; break;
+          v = (r.closing && r.cr > 0 && r.dr === 0 && r.cls !== 'nonop_out') ? 0 : r.dr - r.cr;
+          if (r.cls === 'prod') b.prod += v; else if (r.cls === 'sga') b.sga += v; else b.nonopOut += v;
+          var lc = lumpyCat(r.acct);
+          if (lc) { b.lumpy += v; b.lumpyCat[lc] = (b.lumpyCat[lc] || 0) + v; }
+          break;
         case 'nonop_in': b.nonopIn += r.cr - r.dr; break;
       }
     });
@@ -27,9 +43,11 @@
       b.incurred = b.prod + b.sga + b.nonopOut;
       b.plBook = b.rev - b.cogsBook - b.sga + b.nonopIn - b.nonopOut;      // 손익계산서 기준
       b.plIncurred = b.rev - b.incurred + b.nonopIn;                       // 발생비용 기준
+      b.estAdj = 0; b.plEst = b.plIncurred;
       b.flags = [];
       return b;
     });
+    list.estimate = estimateSettlement(m, list);
     var revs = list.map(function (b) { return b.rev; }).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
     var med = revs.length ? revs[Math.floor(revs.length / 2)] : 0;
     var lastYm = m.asOf ? m.asOf.slice(0, 7) : null;
@@ -37,10 +55,53 @@
       if (b.rev > 0 && b.prod > 0 && b.cogsBook === 0) b.flags.push({ k: 'cogs', t: '원가 미결산' });
       if (b.rev < 0 || b.incurred < 0) b.flags.push({ k: 'adj', t: '결산 조정(마이너스) 포함' });
       if (b.rev > 0 && med > 0 && b.rev < med * 0.3) b.flags.push({ k: 'drop', t: '매출 급감(마감 확인)' });
+      if (b.estAdj > 0) b.flags.push({ k: 'est', t: '결산 예상 반영' });
       if (b.ym === lastYm && +m.asOf.slice(8) < 25) b.flags.push({ k: 'partial', t: '진행 중인 달' });
     });
     return list;
   };
+
+  /* 분기 말에만 반영되는 결산성 비용(감가상각, 퇴직급여, 충당부채, 주식보상, 이자 정산)이 아직 입력되지 않은 분기를
+     직전 결산 완료 분기(최대 2개)의 평균으로 추정한다. 진행 중인 분기는 경과 일수만큼만 반영한다. */
+  function estimateSettlement(m, list) {
+    var q = {};
+    list.forEach(function (b) {
+      var k = qOf(b.ym), o = q[k] = q[k] || { q: k, tot: {}, dep: 0 };
+      Object.keys(b.lumpyCat).forEach(function (c) { o.tot[c] = (o.tot[c] || 0) + b.lumpyCat[c]; });
+      o.dep = o.tot['감가상각'] || 0;
+    });
+    var qs = Object.keys(q).sort();
+    var settled = qs.filter(function (k) { return q[k].dep > 0 && qEnded(m, k); });
+    var out = { available: false, basis: [], quarters: [], perQuarter: {}, perQuarterTotal: 0 };
+    if (!settled.length) return out;
+    var basis = settled.slice(-2);
+    var avg = {};
+    basis.forEach(function (k) { Object.keys(q[k].tot).forEach(function (c) { avg[c] = (avg[c] || 0) + q[k].tot[c] / basis.length; }); });
+    out.available = true; out.basis = basis; out.perQuarter = avg;
+    out.perQuarterTotal = BM.sum(Object.keys(avg), function (c) { return avg[c]; });
+    var lastSettled = settled[settled.length - 1];
+    qs.filter(function (k) { return k > lastSettled && q[k].dep <= 0; }).forEach(function (k) {
+      var frac = qFrac(m, k);
+      if (frac < 0.15) return;
+      var miss = {}, tot = 0;
+      Object.keys(avg).forEach(function (c) {
+        var v = Math.max(0, avg[c] * frac - (q[k].tot[c] || 0));
+        if (v > 0) { miss[c] = v; tot += v; }
+      });
+      if (tot <= 0) return;
+      var ms = qMonths(k).filter(function (ym) { return by(list, ym); });
+      ms.forEach(function (ym) { var b = by(list, ym); b.estAdj = tot / ms.length; b.plEst = b.plIncurred - b.estAdj; });
+      out.quarters.push({ q: k, frac: frac, missing: miss, total: tot, booked: q[k].tot });
+    });
+    return out;
+  }
+  function by(list, ym) { for (var i = 0; i < list.length; i++) if (list[i].ym === ym) return list[i]; return null; }
+  function qEnded(m, k) { var e = qMonths(k)[2]; return m.asOf.slice(0, 7) > e || (m.asOf.slice(0, 7) === e && +m.asOf.slice(8) >= 28); }
+  function qFrac(m, k) {
+    var ms = qMonths(k), s = Date.UTC(+ms[0].slice(0, 4), +ms[0].slice(5) - 1, 1), e = Date.UTC(+ms[2].slice(0, 4), +ms[2].slice(5), 1);
+    return Math.max(0, Math.min(1, (m.asOfT + 86400000 - s) / (e - s)));
+  }
+  BM.qOf = qOf;
 
   /* ---------- 채권/채무 (FIFO) ---------- */
   BM.openItems = function (m, kind) {
@@ -195,18 +256,32 @@
     var settled = pl.filter(function (b) { return b.cogsBook > 0; }).map(function (b) { return b.ym; });
     var lastSettled = settled.length ? settled[settled.length - 1] : null;
     var after = pl.filter(function (b) { return (!lastSettled || b.ym > lastSettled) && (b.rev > 0 || b.prod > 0); });
-    if (after.length) out.warnings.push({ lvl: 'warn', t: '손익계산서상 매출원가는 ' + (lastSettled ? BM.ymLabel(lastSettled) + '까지만' : '아직') + ' 결산되어 있습니다. 이후 ' + after.map(function (b) { return (+b.ym.slice(5)) + '월'; }).join('·') + '의 손익계산서 손익은 원가가 빠져 있으니 발생비용 기준으로 보세요.' });
+    var est = pl.estimate;
+    if (after.length) {
+      var tail = est && est.available && est.quarters.length
+        ? ' 감가상각·퇴직급여·이자 정산 등 결산성 비용 약 ' + BM.eok(BM.sum(est.quarters, function (x) { return x.total; })) + '(직전 결산 분기 평균 기준 추정)을 "결산 예상 반영" 손익에 더했습니다.'
+        : ' 발생비용 기준 손익에는 분기 말 결산성 비용(감가상각 등)이 빠져 있습니다.';
+      out.warnings.push({ lvl: 'warn', t: '손익계산서상 매출원가는 ' + (lastSettled ? BM.ymLabel(lastSettled) + '까지만' : '아직') + ' 결산되어 있습니다. 이후 ' + after.map(function (b) { return (+b.ym.slice(5)) + '월'; }).join('·') + '의 손익계산서 손익은 원가가 빠져 있습니다.' + tail });
+    }
     if (m.dupRows) out.warnings.push({ lvl: 'warn', t: '분개장 파일 간 겹치는 전표 ' + m.dupRows + '행은 한 번만 반영했습니다.' });
     return out;
   };
 
   /* ---------- BEP ---------- */
   var VAR_RE = /운반비|전력비|지급수수료|수선비|소모품비|차량유지비|수도광열비|외주|원재료|충당부채전입/;
-  BM.bep = function (m, pl, months) {
+  BM.bep = function (m, pl, months, useEst) {
     var set = {}; months.forEach(function (x) { set[x] = 1; });
     var sel = pl.filter(function (b) { return set[b.ym]; });
     var out = { months: months, notes: [] };
     var inc = BM.sum(sel, function (b) { return b.incurred; });
+    var est = pl.estimate, smooth = useEst !== false && est && est.available;
+    if (smooth) {
+      // 분기 말에 몰아서 입력되는 결산성 비용은 분기 평균을 월할 반영해 달마다 들쭉날쭉하지 않게 한다
+      var booked = BM.sum(sel, function (b) { return b.lumpy; });
+      inc = inc - booked + months.length * est.perQuarterTotal / 3;
+      out.smoothed = months.length * est.perQuarterTotal / 3;
+      out.notes.push('감가상각·퇴직급여·충당부채·이자 정산 등 분기 말 결산성 비용은 직전 결산 분기(' + est.basis.map(function (x) { return x.replace('Q', '년 ') + '분기'; }).join(', ') + ') 평균을 월할로 반영한 추정입니다.');
+    }
     if (m.trades) {
       var R = 0, V = 0;
       m.trades.rows.forEach(function (t) { if (!set[t.ym]) return; if (t.flow === '매출') R += t.amt; else V += t.amt; });
