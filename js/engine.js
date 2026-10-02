@@ -21,7 +21,22 @@
     files.filter(function (f) { return f.kind === 'vendors'; }).forEach(function (f) { vlist = vlist.concat(f.data.list); });
     var m = BM.buildModel({ journals: journals, trades: trades, vendors: vlist.length ? { list: vlist } : null });
     var pl = BM.monthlyPL(m), rc = BM.reconcile(m, pl);
-    var S = { m: m, pl: pl, rc: rc, ar: BM.openItems(m, 'AR'), ap: BM.openItems(m, 'AP'), bepMonths: BM.defaultMonths(m, pl, rc) };
+    var seenRep = {};
+    var reports = files.filter(function (f) { return f.kind === 'report'; }).filter(function (f) {   // 같은 내용의 보고서가 두 번 올라오면 한 번만 쓴다
+      var sig = f.data.type + '|' + f.data.months.join(',') + '|' + f.data.rows.length + '|' + f.data.rows.reduce(function (t, r) { return t + Object.keys(r.vals).reduce(function (u, k) { return u + (r.vals[k] || 0); }, 0); }, 0);
+      if (seenRep[sig]) return false; seenRep[sig] = 1; return true;
+    });
+    var erp = BM.erpCheck(m, reports);
+    erp.badMonths = {};
+    erp.items.forEach(function (it) { it.bad.forEach(function (b) { erp.badMonths[b.ym] = (erp.badMonths[b.ym] || 0) + 1; }); });
+    erp.items.filter(function (it) { return it.bad.length; }).forEach(function (it) {
+      var b = it.bad[0], nm = it.type === 'pl' ? '손익계산서' : '제조원가명세서';
+      rc.warnings.push({ lvl: 'bad', t: 'ERP ' + nm + '(' + it.file + ')의 ' + it.label + ' 중 ' + it.bad.length + '개 항목이 분개장에서 계산한 금액과 다릅니다. 예: ' + BM.ymLabel(b.ym) + ' ' + b.name + ' ERP ' + BM.won(b.erp) + ' / 분개장 ' + BM.won(b.mine) + '. ERP 보고서를 받은 뒤 전표가 바뀌었거나 분개장 파일이 일부 빠졌을 수 있습니다.' });
+    });
+    erp.items.filter(function (it) { return it.other; }).forEach(function (it) {
+      rc.warnings.push({ lvl: 'warn', t: '도급(도) 계정이 아닌 제조 계정(' + it.other.names.slice(0, 3).join(', ') + ')에 ' + BM.won(it.other.amt) + '이 입력되어 있습니다. 제조원가명세서에는 반영되지 않는 금액입니다. 계정 선택이 맞는지 확인하세요.' });
+    });
+    var S = { erp: erp, m: m, pl: pl, rc: rc, ar: BM.openItems(m, 'AR'), ap: BM.openItems(m, 'AP'), bepMonths: BM.defaultMonths(m, pl, rc) };
     var keys = {};
     S.ar.vendors.concat(S.ap.vendors).forEach(function (v) { keys[v.key] = 1; });
     if (trades) trades.rows.forEach(function (t) { if (t.vk) keys[t.vk] = 1; });
@@ -86,6 +101,7 @@
     }
     var PERIOD = ['q19', 'q2', 'q4', 'q5', 'q6', 'q7', 'q11', 'q14', 'q15', 'q16'];
     var a;
+    var erpMonths = null;
     if (c.month && PERIOD.indexOf(qid) >= 0 && S.m.months.indexOf(c.month) < 0) {
       var last = S.m.months[S.m.months.length - 1];
       a = { headline: BM.ymLabel(c.month) + '은 분개장에 입력된 전표가 없습니다. 0원이 아니라 자료가 없는 것입니다. 분개장의 마지막 달은 ' + BM.ymLabel(last) + '입니다.', body: '', notes: ['경리 담당자가 해당 월 분개장을 올린 뒤 다시 물어보세요.'], status: '잠정' };
@@ -95,6 +111,17 @@
       if (c.month && PERIOD.indexOf(qid) >= 0 && c.month === S.m.asOf.slice(0, 7) && day < 25) {
         a.headline = '※ ' + BM.ymLabel(c.month) + '은 ' + day + '일까지만 입력된 진행 중인 달이라 금액이 적게 나옵니다. ' + a.headline;
       }
+    }
+    if (S.erp && S.erp.n && c.month && ['q4', 'q6', 'q14', 'q15', 'q16', 'q20', 'q21'].indexOf(qid) >= 0) {
+      var from0 = (qid === 'q20' || qid === 'q21') ? (c.from || c.month.slice(0, 4) + '-01') : c.month;
+      var ms = S.m.months.filter(function (ym) { return ym >= from0 && ym <= c.month; });
+      var okM = ms.filter(function (ym) { return S.erp.months[ym] && !S.erp.badMonths[ym]; }), badM = ms.filter(function (ym) { return S.erp.badMonths[ym]; }), noM = ms.filter(function (ym) { return !S.erp.months[ym]; });
+      var lab = function (l) { return l.map(function (ym) { return (+ym.slice(5)) + '월'; }).join('·'); };
+      var parts = [];
+      if (okM.length) parts.push('ERP 보고서와 일치: ' + lab(okM));
+      if (badM.length) parts.push('ERP 보고서와 다름: ' + lab(badM));
+      if (noM.length) parts.push('대조 안 함: ' + lab(noM));
+      (a.notes = a.notes || []).push('ERP 보고서 대조 — ' + parts.join(' / ') + '. (대조 범위: 손익계산서·제조원가명세서의 계정별 월 금액)');
     }
     var st = a.status || BASE_STATUS[qid] || '잠정';
     var b = c.month ? S.pl.filter(function (x) { return x.ym === c.month; })[0] : null;

@@ -79,9 +79,10 @@ function validFiles(files) {
   if (!Array.isArray(files) || !files.length || files.length > 60) return '파일 목록이 올바르지 않습니다';
   let journals = 0;
   for (const f of files) {
-    if (!f || typeof f.name !== 'string' || f.name.length > 300 || !['journal', 'trades', 'vendors'].includes(f.kind) || !f.data || typeof f.data !== 'object') return '파일 항목이 올바르지 않습니다';
+    if (!f || typeof f.name !== 'string' || f.name.length > 300 || !['journal', 'trades', 'vendors', 'report'].includes(f.kind) || !f.data || typeof f.data !== 'object') return '파일 항목이 올바르지 않습니다';
     if (f.kind === 'journal') { journals++; if (!Array.isArray(f.data.rows) || (f.data.rows[0] && (typeof f.data.rows[0].date !== 'string' || typeof f.data.rows[0].acct !== 'string'))) return '분개장 형식이 올바르지 않습니다'; }
     if (f.kind === 'trades' && !Array.isArray(f.data.rows)) return '거래내역 형식이 올바르지 않습니다';
+    if (f.kind === 'report' && (!Array.isArray(f.data.rows) || !Array.isArray(f.data.months) || !['pl', 'cost'].includes(f.data.type))) return 'ERP 보고서 형식이 올바르지 않습니다';
     if (f.kind === 'vendors' && !Array.isArray(f.data.list)) return '업체마스터 형식이 올바르지 않습니다';
   }
   return journals ? null : '분개장이 한 개 이상 필요합니다';

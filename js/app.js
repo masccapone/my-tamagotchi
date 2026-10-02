@@ -104,7 +104,7 @@
         if (r.kind === 'trades' && r.vendors) files.push({ name: r.name + ' (업체마스터)', kind: 'vendors', data: r.vendors });
       });
       $('msg').innerHTML = bad.length ? '<div class="callout warn">읽지 못한 파일: ' + bad.map(function (b) { return esc(b.name); }).join(', ') +
-        '<br>분개장(ERP 내보내기), 거래내역 템플릿, 반입/반출 현황, 업체마스터 템플릿 형식만 지원합니다.</div>' : '';
+        '<br>분개장(ERP 내보내기), 거래내역 템플릿, 반입/반출 현황, 업체마스터 템플릿, ERP 월별 손익계산서·제조원가명세서 형식만 지원합니다.</div>' : '';
       if (res.some(function (r) { return r.kind; })) dirty = true;
       refresh();
     });
@@ -153,7 +153,7 @@
 
   function renderChips() {
     var cnt = function (k) { return files.filter(function (f) { return f.kind === k; }).length; };
-    [['chip-j', 'journal'], ['chip-t', 'trades'], ['chip-v', 'vendors']].forEach(function (p) { $(p[0]).classList.toggle('on', cnt(p[1]) > 0); });
+    [['chip-j', 'journal'], ['chip-t', 'trades'], ['chip-v', 'vendors'], ['chip-r', 'report']].forEach(function (p) { $(p[0]).classList.toggle('on', cnt(p[1]) > 0); });
     $('chip-j').textContent = '분개장' + (cnt('journal') ? ' ' + cnt('journal') + '개' : '');
     var canEdit = mode === 'standalone' || role === 'accountant';
     $('loaded').innerHTML = files.filter(function (f) { return f.kind !== 'vendors' || f.name.indexOf('(업체마스터)') < 0; }).map(function (f) {
@@ -186,8 +186,15 @@
     var w = S.rc.warnings.map(function (x) { return '<li class="' + x.lvl + '">' + esc(x.t) + '</li>'; }).join('');
     $('summary').innerHTML = '<div class="asof">기준일: <b>' + m.asOf + '</b> (분개장 마지막 전표일). 이 날짜 이후의 입금·지급은 반영되지 않았습니다.</div>' +
       '<div class="tiles">' + tiles + '</div>' + estBox +
+      erpLine() +
       (w ? '<div class="callout warn"><b>데이터 점검 ' + S.rc.warnings.length + '건</b><ul class="wl">' + w + '</ul></div>' : '<div class="callout ok">데이터 점검에서 발견된 문제가 없습니다.</div>');
     bindEst();
+  }
+  function erpLine() {
+    var e = S.erp;
+    if (!e || !e.n) return '<div class="hint">ERP 월별 손익계산서·제조원가명세서를 같이 올리면 계산 결과를 ERP 숫자와 자동으로 대조합니다.</div>';
+    var span = e.monthList.length ? BM.ymLabel(e.monthList[0]) + '~' + BM.ymLabel(e.monthList[e.monthList.length - 1]) : '';
+    return '<div class="callout ' + (e.diffs ? 'warn' : 'ok') + '">ERP 보고서 대조(' + span + '): ' + e.n.toLocaleString('ko-KR') + '개 항목 중 ' + (e.diffs ? (e.n - e.diffs).toLocaleString('ko-KR') + '개 일치, <b>' + e.diffs + '개 불일치</b> (아래 데이터 점검 참고)' : '모두 일치') + '</div>';
   }
   function pct(x) { return x == null ? '산정 불가' : (x >= 0 ? '+' : '') + (x * 100).toFixed(1) + '%'; }
   function bindEst() {

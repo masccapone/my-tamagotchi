@@ -202,6 +202,7 @@
       if (BM.isStatusBook(wb)) return { kind: 'trades', data: BM.parseStatusBook(wb) };
       if (BM.isVendorMaster(wb) && wb.SheetNames.indexOf('거래내역') < 0) return { kind: 'vendors', data: BM.parseVendorMaster(wb) };
       if (BM.isJournal(wb)) return { kind: 'journal', data: BM.parseJournal(wb) };
+      if (BM.isErpReport(wb)) { var rep = BM.parseErpReport(wb); if (rep && rep.type !== 'unknown') return { kind: 'report', data: rep }; }
       return { kind: null };
     });
   };

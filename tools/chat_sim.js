@@ -1,6 +1,6 @@
 'use strict';
 /* 카카오톡 대화 시뮬레이터: 문장을 한 줄씩 넣으면 챗봇이 돌려줄 답을 그대로 보여준다.
-   사용: node tools/chat_sim.js --journal 분개장1.xlsx 분개장2.xlsx [--trades 파일] --phrases 문장.txt
+   사용: node tools/chat_sim.js --journal 분개장1.xlsx 분개장2.xlsx [--trades 파일] [--report ERP보고서...] --phrases 문장.txt
    (문장.txt 는 한 줄에 질문 하나. 출력에는 회사 숫자가 들어 있으니 저장소에 올리지 말 것) */
 const fs = require('fs'), path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -13,6 +13,7 @@ const rd = p => XLSX.read(fs.readFileSync(p), { type: 'buffer', cellDates: true 
 const files = [];
 list('journal').forEach(p => files.push({ name: path.basename(p), kind: 'journal', data: BM.parseJournal(rd(p)) }));
 list('trades').forEach(p => { const wb = rd(p); files.push({ name: path.basename(p), kind: 'trades', data: BM.isStatusBook(wb) ? BM.parseStatusBook(wb) : BM.parseTrades(wb) }); });
+list('report').forEach(p => { const wb = rd(p); const rep = BM.isErpReport(wb) ? BM.parseErpReport(wb) : null; if (rep) files.push({ name: path.basename(p), kind: 'report', data: rep }); });
 const S = E.build(files);
 const phrases = fs.readFileSync(list('phrases')[0], 'utf8').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 let ok = 0, refused = 0;

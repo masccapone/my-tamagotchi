@@ -507,6 +507,62 @@
     return o;
   };
 
+  /* ERP가 직접 낸 월별 보고서(손익계산서, 제조원가명세서)와 분개장에서 다시 계산한 금액을 비교한다.
+     reports: [{ name, data: parseErpReport 결과 }]. 반환: { items:[{file,type,label,n,bad,extra}], n, diffs, months } */
+  BM.erpCheck = function (m, reports) {
+    var acc = BM.accountMonthly(m), out = { items: [], n: 0, diffs: 0, months: {}, types: {} };
+    var lastYm = m.months[m.months.length - 1];
+    function side(cls, keep) {
+      var o = {};
+      Object.keys(acc[cls]).forEach(function (a) {
+        if (keep && !keep(a)) return;
+        var k = BM.acctStrip(a); o[k] = o[k] || {};
+        Object.keys(acc[cls][a]).forEach(function (ym) { o[k][ym] = (o[k][ym] || 0) + acc[cls][a][ym]; });
+      });
+      return o;
+    }
+    function compare(rep, file, label, groups, mine) {
+      var found = {}, n = 0, bad = [], extra = [];
+      var months = rep.months.filter(function (ym) { return ym <= lastYm; });
+      rep.rows.filter(function (x) { return !x.header && groups.indexOf(x.group) >= 0; }).forEach(function (x) {
+        found[x.name] = 1;
+        months.forEach(function (ym) {
+          if (x.vals[ym] == null) return;
+          var a = x.vals[ym], b = (mine[x.name] || {})[ym] || 0; n++;
+          if (Math.abs(a - b) > 1) bad.push({ name: x.name, ym: ym, erp: a, mine: b });
+        });
+      });
+      Object.keys(mine).forEach(function (k) {
+        if (found[k]) return;
+        months.forEach(function (ym) { var v = (mine[k] || {})[ym]; if (v && Math.abs(v) > 1) extra.push({ name: k, ym: ym, amt: v }); });
+      });
+      out.items.push({ file: file, type: rep.type, label: label, n: n, bad: bad, extra: extra });
+      out.n += n; out.diffs += bad.length;
+      months.forEach(function (ym) { out.months[ym] = (out.months[ym] || 0) + 1; });
+      out.types[rep.type] = true;
+    }
+    (reports || []).forEach(function (r) {
+      var rep = r.data;
+      if (!rep || !rep.rows) return;
+      if (rep.type === 'pl') {
+        compare(rep, r.name, '매출', ['매출액'], side('revenue'));
+        compare(rep, r.name, '매출원가', ['매출원가'], side('cogs'));
+        compare(rep, r.name, '판매비와관리비', ['판매비와관리비'], side('sga'));
+        compare(rep, r.name, '영업외수익', ['영업외수익'], side('nonop_in'));
+        compare(rep, r.name, '영업외비용', ['영업외비용'], side('nonop_out'));
+      } else if (rep.type === 'cost') {
+        compare(rep, r.name, '제조원가명세서(도급 계정)', ['공사원재료비', '노무비', '외주비', '경비'], side('prod', function (a) { return /\(도\)$/.test(a); }));
+        // 도급 계정이 아닌 제조 계정((제)·(분))에 금액이 있으면 원가명세서에 반영되지 않는 금액이다
+        var other = side('prod', function (a) { return !/\(도\)$/.test(a); }), amt = 0, names = {};
+        Object.keys(other).forEach(function (k) { Object.keys(other[k]).forEach(function (ym) { if (ym <= lastYm && rep.months.indexOf(ym) >= 0 && Math.abs(other[k][ym]) > 1) { amt += other[k][ym]; names[k] = 1; } }); });
+        if (amt) out.items.push({ file: r.name, type: 'cost', label: '도급 외 제조 계정', n: 0, bad: [], extra: [], other: { amt: amt, names: Object.keys(names) } });
+      }
+    });
+    out.ok = out.n > 0 && out.diffs === 0;
+    out.monthList = Object.keys(out.months).sort();
+    return out;
+  };
+
   /* BEP·분석에 쓸 기본 기간: 거래내역이 있고 분개장이 마감된 달 */
   BM.defaultMonths = function (m, pl, rc) {
     var recon = {}; (rc.months || []).forEach(function (r) { recon[r.ym] = r; });
