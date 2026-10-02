@@ -343,32 +343,49 @@
   BM.bep = function (m, pl, months, useEst) {
     var set = {}; months.forEach(function (x) { set[x] = 1; });
     var sel = pl.filter(function (b) { return set[b.ym]; });
-    var out = { months: months, notes: [] };
+    var out = { months: months, notes: [], monthly: [] };
     var inc = BM.sum(sel, function (b) { return b.incurred; });
     var est = pl.estimate, smooth = useEst !== false && est && est.available;
+    var n = months.length;
+    // 결산성 비용 항목별 합계(선택 기간): 분기 말에 몰아 입력되므로 추정 반영 시 분기 평균을 월할로 쓴다
+    function lump(cat) {
+      return smooth ? n * (est.perQuarter[cat] || 0) / 3 : BM.sum(sel, function (b) { return b.lumpyCat[cat] || 0; });
+    }
     if (smooth) {
-      // 분기 말에 몰아서 입력되는 결산성 비용은 분기 평균을 월할 반영해 달마다 들쭉날쭉하지 않게 한다
       var booked = BM.sum(sel, function (b) { return b.lumpy; });
       inc = inc - booked + months.length * est.perQuarterTotal / 3;
       out.smoothed = months.length * est.perQuarterTotal / 3;
       out.notes.push('감가상각·퇴직급여·충당부채·이자 정산 등 분기 말 결산성 비용은 직전 결산 분기(' + est.basis.map(function (x) { return x.replace('Q', '년 ') + '분기'; }).join(', ') + ') 평균을 월할로 반영한 추정입니다.');
     }
+    var nonopIn = BM.sum(sel, function (b) { return b.nonopIn; });
+    var interest = lump('이자비용');
+    var nonopOut = BM.sum(sel, function (b) { return b.nonopOut; }) - BM.sum(sel, function (b) { return b.lumpyCat['이자비용'] || 0; }) + interest;
+    var acc = BM.accountMonthly(m), amort = 0;
+    Object.keys(acc.prod).concat(Object.keys(acc.sga)).forEach(function (k) { /무형자산상각/.test(k) && months.forEach(function (ym) { amort += (acc.prod[k] && acc.prod[k][ym]) || (acc.sga[k] && acc.sga[k][ym]) || 0; }); });
+    out.comp = { nonopIn: nonopIn, nonopOut: nonopOut, interest: interest, dep: lump('감가상각') + amort, noncash: lump('퇴직급여') + lump('충당부채전입') + lump('주식보상비용') };
+    var byYm = {};
     if (m.trades) {
       var R = 0, V = 0;
-      m.trades.rows.forEach(function (t) { if (!set[t.ym]) return; if (t.flow === '매출') R += t.amt; else V += t.amt; });
-      out.mode = 'trades'; out.R = R; out.V = V; out.F = inc - V;
-      out.notes.push('매출과 변동비는 거래내역 기준(반출 처리·운반비를 변동비로 봄), 고정비는 분개장 발생비용에서 변동비를 뺀 값입니다.');
+      m.trades.rows.forEach(function (t) {
+        if (!set[t.ym]) return;
+        var o = byYm[t.ym] = byYm[t.ym] || { R: 0, V: 0 };
+        if (t.flow === '매출') { R += t.amt; o.R += t.amt; } else { V += t.amt; o.V += t.amt; }
+      });
+      out.mode = 'trades'; out.R = R; out.V = V; out.F = inc - V - nonopIn;
+      out.notes.push('매출과 변동비는 거래내역 기준(반출 처리·운반비를 변동비로 봄), 고정비는 분개장 발생비용에서 변동비와 영업외수익을 뺀 값입니다.');
       if (out.F < 0) out.notes.push('분개장 발생비용이 거래내역의 변동비보다 작습니다. 분개장 입력이 덜 된 달이 포함됐을 수 있습니다.');
     } else {
       var R2 = BM.sum(sel, function (b) { return b.rev; }), V2 = 0;
+      sel.forEach(function (b) { byYm[b.ym] = { R: b.rev, V: 0 }; });
       m.rows.forEach(function (r) {
         if (!set[r.ym] || (r.cls !== 'prod' && r.cls !== 'sga' && r.cls !== 'nonop_out')) return;
         if (r.closing && r.dr === 0 && r.cr !== 0 && r.cls !== 'nonop_out') return;
-        if (VAR_RE.test(r.acct)) V2 += r.dr - r.cr;
+        if (VAR_RE.test(r.acct)) { V2 += r.dr - r.cr; byYm[r.ym].V += r.dr - r.cr; }
       });
-      out.mode = 'accounts'; out.R = R2; out.V = V2; out.F = inc - V2;
+      out.mode = 'accounts'; out.R = R2; out.V = V2; out.F = inc - V2 - nonopIn;
       out.notes.push('거래내역이 없어 계정과목 이름으로 변동비를 추정한 초안입니다. 거래내역을 올리면 실제 반출비 기준으로 계산합니다.');
     }
+    months.forEach(function (ym) { var o = byYm[ym] || { R: 0, V: 0 }; out.monthly.push({ ym: ym, R: o.R, V: o.V }); });
     out.n = months.length;
     out.cm = out.R - out.V;
     out.cmr = out.R > 0 ? out.cm / out.R : 0;
@@ -376,6 +393,44 @@
     out.achieve = out.bepRev ? out.R / out.bepRev : null;
     out.gap = out.bepRev ? out.bepRev - out.R : null;
     return out;
+  };
+
+  /* 손익분기 3기준(세전이익·EBITDA·현금). 매출이 늘 때 변동비가 늘어나는 비율은
+     "월별 매출 증감 대비 변동비 증감"을 인접한 달끼리 구해 평균한다(매출 변화가 작은 달은 제외). */
+  BM.bep3 = function (b) {
+    var n = b.n || 1, c = b.comp, mean = b.R / n;
+    var pairs = [];
+    for (var i = 1; i < b.monthly.length; i++) {
+      var p = b.monthly[i - 1], q = b.monthly[i];
+      if ((+q.ym.slice(0, 4)) * 12 + (+q.ym.slice(5)) - (+p.ym.slice(0, 4)) * 12 - (+p.ym.slice(5)) !== 1) continue;
+      var dR = q.R - p.R, dV = q.V - p.V;
+      pairs.push({ from: p.ym, to: q.ym, dR: dR, dV: dV, ratio: dR !== 0 ? dV / dR : null, used: Math.abs(dR) >= 0.1 * mean });
+    }
+    var used = pairs.filter(function (x) { return x.used && x.ratio != null; });
+    var avgRatio = b.R > 0 ? b.V / b.R : 0, v, vSrc, notes = [];
+    if (used.length >= 2) {
+      v = BM.sum(used, function (x) { return x.ratio; }) / used.length; vSrc = 'incr';
+      var rs = used.map(function (x) { return x.ratio; });
+      if (Math.max.apply(null, rs) - Math.min.apply(null, rs) > 0.5) notes.push('월별 변동비 증감 비율이 ' + (Math.min.apply(null, rs) * 100).toFixed(0) + '%~' + (Math.max.apply(null, rs) * 100).toFixed(0) + '%로 들쭉날쭉합니다. 평균은 참고용입니다.');
+      if (!(v > 0 && v < 0.95)) { v = avgRatio; vSrc = 'avg'; notes.push('월별 증감으로 구한 변동비율이 비정상 범위라 기간 평균 변동비율을 썼습니다.'); }
+    } else { v = avgRatio; vSrc = 'avg'; notes.push('매출이 충분히 변한 달 쌍이 2개 미만이라 증감 방식으로 구할 수 없어 기간 평균 변동비율을 썼습니다.'); }
+    var Fop = b.F + c.nonopIn - c.nonopOut;
+    var Febitda = Fop - c.dep;
+    var Fcash = Febitda - c.noncash + c.interest;
+    var cmr = 1 - v;
+    var bases = [
+      { key: 'pt', name: '세전이익 기준', F: b.F, def: '매출 - 변동비 - 고정비(감가상각·이자 포함) + 영업외수익 = 0' },
+      { key: 'ebitda', name: 'EBITDA 기준', F: Febitda, def: '영업이익 + 감가상각 = 0 (감가상각·이자·영업외손익 제외)' },
+      { key: 'cash', name: '현금 기준', F: Fcash, def: 'EBITDA 고정비에서 비현금 비용(퇴직급여·충당부채·주식보상)을 빼고 이자 지급을 더한 현금 고정비. 원금상환·설비투자·운전자본·세금 제외' }
+    ].map(function (x) {
+      var per = x.F / n;
+      x.perMonthF = per;
+      x.bepMonth = cmr > 0.05 ? Math.max(0, per / cmr) : null;
+      x.profitNow = (b.R - b.V - x.F) / n;
+      x.gapMonth = x.bepMonth == null ? null : x.bepMonth - mean;
+      return x;
+    });
+    return { n: n, meanR: mean, v: v, vSrc: vSrc, cmr: cmr, avgRatio: avgRatio, pairs: pairs, usedN: used.length, bases: bases, notes: notes };
   };
 
   /* BEP·분석에 쓸 기본 기간: 거래내역이 있고 분개장이 마감된 달 */

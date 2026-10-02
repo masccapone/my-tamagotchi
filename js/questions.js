@@ -22,7 +22,7 @@
   var Q = BM.questions = [];
 
   /* 1. 업체에 이번 달 얼마, 언제 줘야 하나 */
-  Q.push({ id: 'q1', label: '이 업체에 이번 달 얼마, 언제 줘야 해?', needs: ['vendor', 'month'], run: function (c) {
+  Q.push({ id: 'q1', label: '[업체]에 [월] 지급할 금액과 예정일은?', needs: ['vendor', 'month'], run: function (c) {
     var v = c.ap.vendors.filter(function (x) { return x.key === c.vk; })[0];
     if (!v || (v.open <= 0 && !v.opening)) return { headline: c.vname + '에 줄 미지급금이 없습니다 (' + BM.fmtAsOf(c) + ' 기준).', body: '', notes: [] };
     var r = monthRange(c.month), due = 0, over = 0, later = 0;
@@ -41,7 +41,7 @@
   } });
 
   /* 2. 업체 돈 들어왔어? */
-  Q.push({ id: 'q2', label: '이 업체 이번 달에 돈 들어왔어?', needs: ['vendor?', 'month'], run: function (c) {
+  Q.push({ id: 'q2', label: '[업체]의 [월] 입금액은?', needs: ['vendor?', 'month'], run: function (c) {
     var rows = BM.receipts(c.m).filter(function (x) { return x.ym === c.month && x.vk; });
     var notes = ['전표 입력 기준입니다. 실제 입금일과 전표 입력일 사이에 시차가 있을 수 있습니다.', '입금은 보통예금·당좌예금이 차변에 오른 전표에서 외상매출금·선수금·매출 등 대변 줄의 거래처로 셉니다. (은행 수수료 차감 전 금액)'];
     if (!c.vk) {
@@ -64,7 +64,7 @@
   } });
 
   /* 3. 이번 달 나갈 돈과 들어올 돈 */
-  Q.push({ id: 'q3', label: '이번 달에 나갈 돈과 들어올 돈이 얼마야?', needs: ['month'], run: function (c) {
+  Q.push({ id: 'q3', label: '[월]에 나갈 돈(미지급)과 들어올 돈(미수)은?', needs: ['month'], run: function (c) {
     var r = monthRange(c.month);
     function agg(items) {
       var due = 0, over = 0, list = [];
@@ -86,7 +86,7 @@
   } });
 
   /* 4. 이 비용은 뭐야 */
-  Q.push({ id: 'q4', label: '이 비용은 뭐야?', needs: ['month', 'acct'], run: function (c) {
+  Q.push({ id: 'q4', label: '[비용 항목]의 [월] 내역(거래처·적요·금액)은?', needs: ['month', 'acct'], run: function (c) {
     var rows = c.m.rows.filter(function (x) {
       return x.ym === c.month && (x.cls === 'prod' || x.cls === 'sga' || x.cls === 'nonop_out') && x.acct.replace(/\((제|도|분|판)\)$/, '') === c.acct && !(x.closing && x.dr === 0 && x.cr !== 0);
     });
@@ -101,7 +101,7 @@
   } });
 
   /* 5. 이번 달 왜 이렇게 많이 나갔어 */
-  Q.push({ id: 'q5', label: '이 비용은 이번 달에 왜 이렇게 많이 나갔어?', needs: ['month', 'acct?'], run: function (c) {
+  Q.push({ id: 'q5', label: '[비용 항목]이 [월]에 평소보다 많았다면 어떤 거래 때문인가?', needs: ['month', 'acct?'], run: function (c) {
     var idx = c.m.months.indexOf(c.month), prev = c.m.months.slice(Math.max(0, idx - 3), idx);
     if (!prev.length) return { headline: '비교할 이전 달 데이터가 없습니다.', body: '', notes: [] };
     var lumpy = /감가상각|퇴직|충당/;
@@ -128,7 +128,7 @@
   } });
 
   /* 6. 이번 달 이익 */
-  Q.push({ id: 'q6', label: '이번 달 이익(손실)이 얼마야?', needs: ['month'], run: function (c) {
+  Q.push({ id: 'q6', label: '[월] 손익은?', needs: ['month'], run: function (c) {
     var b = c.pl.filter(function (x) { return x.ym === c.month; })[0];
     if (!b) return { headline: '해당 월 데이터가 없습니다.', body: '', notes: [] };
     var notes = [], useEst = c.useEst !== false && b.estAdj > 0, est = c.pl.estimate;
@@ -170,7 +170,7 @@
   } });
 
   /* 7. 줄일 수 있는 비용 */
-  Q.push({ id: 'q7', label: '지금 줄일 수 있는 비용 항목이 뭐가 있을까?', needs: ['month'], run: function (c) {
+  Q.push({ id: 'q7', label: '월평균 비용이 큰 항목 순위는? (절감 검토 후보)', needs: ['month'], run: function (c) {
     var idx = c.m.months.indexOf(c.month), ms = c.m.months.slice(Math.max(0, idx - 2), idx + 1);
     var acc = {};
     ms.forEach(function (ym) { var e = BM.expenseByAcct(c.m, ym); Object.keys(e).forEach(function (k) { acc[k] = (acc[k] || 0) + e[k].amt / ms.length; }); });
@@ -185,28 +185,43 @@
   } });
 
   /* 8. BEP */
-  Q.push({ id: 'q8', label: '이익으로 전환하려면 매출이 얼마나 더 필요해?', needs: [], run: function (c) {
+  Q.push({ id: 'q8', label: '손익분기 매출은 얼마이고, 지금 매출은 거기서 얼마나 모자라거나 남아?', needs: [], run: function (c) {
     var b = BM.bep(c.m, c.pl, c.bepMonths, c.useEst);
     var n = b.n || 1;
     if (!b.n || b.R <= 0) return { headline: '손익분기를 계산할 기간 데이터가 부족합니다.', body: '', notes: b.notes };
     var notes = b.notes.slice();
     notes.push('계산 기간: ' + c.bepMonths.map(function (x) { return BM.ymLabel(x); }).join(', ') + ' (거래내역이 있고 분개장이 마감된 달).');
-    if (b.bepRev == null) return { headline: '변동비가 매출의 ' + (b.V / b.R * 100).toFixed(0) + '%라 공헌이익률이 낮아 손익분기점을 계산할 수 없습니다.', body: '', notes: notes };
-    function bepWith(F, cmr) { return cmr > 0.05 ? F / cmr : null; }
-    var sens = [
-      ['현재', b.F, b.cmr],
-      ['고정비 10% 절감', b.F * 0.9, b.cmr],
-      ['변동비율 5%p 절감', b.F, b.cmr + 0.05],
-      ['매출 단가 5% 인상', b.F, (b.R * 1.05 - b.V) / (b.R * 1.05)]
-    ].map(function (x) { var v = bepWith(x[1], x[2]); return [x[0], v ? BM.eok(v / n) : '-', v ? BM.eok(v / n - b.R / n) : '-']; });
-    return { headline: '손익분기 매출은 월 ' + BM.eok(b.bepRev / n) + ', 현재 월 평균 ' + BM.eok(b.R / n) + ' → 달성률 ' + (b.achieve * 100).toFixed(0) + '%, 월 ' + BM.eok(Math.max(0, b.gap) / n) + ' 더 필요합니다.',
-      body: '<div class="tiles">' + tile('월 평균 매출', BM.eok(b.R / n)) + tile('월 평균 고정비', BM.eok(b.F / n)) + tile('변동비율', (b.V / b.R * 100).toFixed(0) + '%', '공헌이익률 ' + (b.cmr * 100).toFixed(0) + '%') + '</div>' +
-        '<h4>비용·단가를 바꾸면 (월 기준)</h4>' + tbl(['시나리오', '손익분기 매출', '현재 대비 추가 필요'], sens, [1, 2]),
-      notes: notes };
+    var t = BM.bep3(b);
+    notes = notes.concat(t.notes);
+    if (t.cmr <= 0.05) return { headline: '변동비율이 ' + (t.v * 100).toFixed(0) + '%라 공헌이익률이 낮아 손익분기점을 계산할 수 없습니다.', body: '', notes: notes };
+    var pt = t.bases[0];
+    function cell(x) { return x == null ? '-' : BM.eok(x); }
+    function sgn(x) { return x == null ? '-' : (x >= 0 ? '+' : '-') + BM.eok(Math.abs(x)); }
+    var rows = t.bases.map(function (x) {
+      return [x.name, BM.eok(x.perMonthF), cell(x.bepMonth), sgn(x.profitNow), x.gapMonth == null ? '-' : (x.gapMonth > 0 ? '매출 ' + BM.eok(x.gapMonth) + ' 더 필요' : '매출 ' + BM.eok(-x.gapMonth) + ' 여유')];
+    });
+    var grow = [0, 0.1, 0.2, 0.3].map(function (g) {
+      var R2 = t.meanR * (1 + g);
+      return ['+' + (g * 100) + '% (월 ' + BM.eok(R2) + ')'].concat(t.bases.map(function (x) {
+        var prof = x.profitNow + (R2 - t.meanR) * t.cmr;
+        return sgn(prof);
+      }));
+    });
+    var pairRows = t.pairs.map(function (x) {
+      return [BM.ymLabel(x.from) + ' → ' + BM.ymLabel(x.to), sgn(x.dR), sgn(x.dV), x.ratio == null ? '-' : (x.ratio * 100).toFixed(0) + '%', x.used ? '반영' : '제외(매출 변화 작음)'];
+    });
+    var vtxt = t.vSrc === 'incr' ? '매출이 1원 늘면 변동비가 약 ' + (t.v * 100).toFixed(0) + '원 늘어남(월별 증감 ' + t.usedN + '쌍 평균)' : '변동비율 ' + (t.v * 100).toFixed(0) + '% (기간 평균)';
+    return { headline: '세전이익 기준 손익분기 매출은 월 ' + BM.eok(pt.bepMonth) + '(현재 월 평균 ' + BM.eok(t.meanR) + '). EBITDA 기준 ' + cell(t.bases[1].bepMonth) + ', 현금 기준 ' + cell(t.bases[2].bepMonth) + '.',
+      body: '<div class="tiles">' + tile('월 평균 매출', BM.eok(t.meanR)) + tile('월 평균 변동비', BM.eok(b.V / n), vtxt) + tile('적용 공헌이익률', (t.cmr * 100).toFixed(0) + '%', '매출 증가분에 적용') + '</div>' +
+        '<h4>기준별 손익분기 (월 기준)</h4>' + tbl(['기준', '월 고정비', '손익분기 매출', '현재 월 이익', '현재 대비'], rows, [1, 2, 3]) +
+        '<h4>매출이 늘면 월 이익은 (현재 대비 증가분 × 공헌이익률)</h4>' + tbl(['매출', t.bases[0].name, t.bases[1].name, t.bases[2].name], grow, [1, 2, 3]) +
+        '<h4>변동비율을 구한 근거 (월별 증감)</h4>' + tbl(['구간', '매출 증감', '변동비 증감', '변동비 ÷ 매출 증감', '구분'], pairRows, [1, 2, 3]) +
+        '<h4>기준 정의</h4>' + tbl(['기준', '정의'], t.bases.map(function (x) { return [x.name, esc(x.def)]; }), []),
+      notes: notes.concat(['비용 절감 효과는 "월 고정비"를 줄인 만큼 손익분기 매출이 (줄인 금액 ÷ 공헌이익률)만큼 낮아지는 것으로 직접 계산해 보세요. 어떤 비용을 줄일 수 있는지는 "줄일 수 있는 비용 항목"에서 확인합니다.']) };
   } });
 
   /* 9. 현재 통장 잔액 */
-  Q.push({ id: 'q9', label: '우리 현재 현금이 얼마나 있어? (통장 잔액)', needs: ['cash'], run: function (c) {
+  Q.push({ id: 'q9', label: '현재 통장 잔액은?', needs: ['cash'], run: function (c) {
     var rows = BM.cashRows(c.m);
     var by = {};
     rows.forEach(function (x) { var k = x.vendor || '(미지정)'; by[k] = (by[k] || 0) + x.dr - x.cr; });
@@ -235,7 +250,7 @@
   } });
 
   /* 10. 단가 */
-  Q.push({ id: 'q10', label: '이 업체 단가가 얼마고, 지금 그대로 들어오고 있어?', needs: ['vendor'], run: function (c) {
+  Q.push({ id: 'q10', label: '[업체]의 월별 실제 단가와 최근 변동은?', needs: ['vendor'], run: function (c) {
     if (!c.m.trades) return { headline: '단가는 거래내역 파일이 있어야 확인할 수 있습니다.', body: '', notes: ['거래내역 템플릿을 작성해 올려주세요.'] };
     var up = BM.unitPrices(c.m, c.vk), keys = Object.keys(up);
     if (!keys.length) return { headline: c.vname + '의 거래내역이 없습니다.', body: '', notes: [] };
@@ -272,7 +287,7 @@
   } });
 
   /* 11. 물량 */
-  Q.push({ id: 'q11', label: '이 업체 이번 달 물량이 얼마나 들어왔어?', needs: ['vendor?', 'month'], run: function (c) {
+  Q.push({ id: 'q11', label: '[업체]의 [월] 처리 물량은?', needs: ['vendor?', 'month'], run: function (c) {
     if (!c.m.trades) return { headline: '물량은 거래내역 파일이 있어야 확인할 수 있습니다.', body: '', notes: ['거래내역 템플릿을 작성해 올려주세요.'] };
     var ton = function (kg) { return BM.fmtN(kg / 1000, 1) + '톤'; };
     if (!c.vk) {
@@ -445,7 +460,7 @@
     q5:  { group: '비용', requires: ['journal'], optional: [], status: '확정', def: '해당 월 비용을 직전 3개월 평균과 비교. 감가상각·퇴직급여·충당부채는 제외.' },
     q6:  { group: '손익', requires: ['journal'], optional: [], status: '추정', def: '장부 손익, 발생비용 기준 손익, 결산성 비용을 더한 관리용 추정 손익을 연결표로 제시.' },
     q7:  { group: '비용', requires: ['journal'], optional: [], status: '확정', def: '최근 3개월 월평균 비용 항목 순위. 절감 가능 여부를 판단하지 않음.' },
-    q8:  { group: '손익', requires: ['journal'], optional: ['거래내역(변동비 기준, 권장)'], status: '추정', def: '변동비 = 거래내역의 반출 처리·운반비(없으면 계정 이름으로 추정한 초안). 고정비 = 발생비용 - 변동비 + 결산성 비용 분기 평균 월할. 손익분기 매출 = 고정비 ÷ 공헌이익률.' },
+    q8:  { group: '손익', requires: ['journal'], optional: ['거래내역(변동비 기준, 권장)'], status: '추정', def: '변동비 = 거래내역의 반출 처리·운반비(없으면 계정 이름으로 추정한 초안). 변동비율 = 월별 매출 증감 대비 변동비 증감의 평균(매출 변화가 평균의 10% 미만인 달 쌍 제외, 2쌍 미만이면 기간 평균). 고정비 = 발생비용 - 변동비 - 영업외수익 + 결산성 비용 분기 평균 월할. 손익분기 매출 = 고정비 ÷ 공헌이익률을 세전이익·EBITDA(감가상각·이자·영업외 제외)·현금(비현금 비용 제외, 이자 포함) 3기준으로 제시. 원금상환·설비투자·운전자본·세금은 제외.' },
     q9:  { group: '통장', requires: ['journal'], optional: ['기준일 통장 잔액(입력)'], status: '추정', def: '입력한 기준일 잔액 + 이후 보통예금 증감. 기준 잔액이 없으면 증감만 표시.' },
     q10: { group: '업체별', requires: ['journal', 'trades'], optional: [], status: '확정', def: '거래내역 월별 가중평균 단가(금액÷수량). 분개장 매출과 월별 대조.' },
     q11: { group: '업체별', requires: ['journal', 'trades'], optional: [], status: '확정', def: '거래내역 중 처리비 행의 수량 합(kg·톤).' },
