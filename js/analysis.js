@@ -433,6 +433,38 @@
     return { n: n, meanR: mean, v: v, vSrc: vSrc, cmr: cmr, avgRatio: avgRatio, pairs: pairs, usedN: used.length, bases: bases, notes: notes };
   };
 
+  /* 통장(현금성 계정) 월별 실제 출금·입금: 전표별로 현금성 계정의 순증감을 구하고, 상대 계정별 순액으로 나눈다.
+     (같은 전표 안의 통장 간 이체는 순액으로 상쇄된다. 전표일 기준이라 실제 이체일과 다를 수 있다.) */
+  BM.cashFlow = function (m, ym) {
+    var g = {};
+    m.rows.forEach(function (r) { if (r.ym !== ym) return; var k = r.date + '#' + r.no; (g[k] = g[k] || []).push(r); });
+    var o = { out: 0, inn: 0, outBy: {}, inBy: {}, apVendors: {}, vouchers: 0 };
+    function add(by, a, v) { by[a] = (by[a] || 0) + v; }
+    Object.keys(g).forEach(function (k) {
+      var rs = g[k], bc = 0, bd = 0, other = 0;
+      rs.forEach(function (r) { if (BM.CASH_ACCTS.test(r.acct)) { bc += r.cr; bd += r.dr; } else other++; });
+      if (!other || (bc === 0 && bd === 0)) return;   // 통장 간 이체만 있는 전표는 제외
+      o.vouchers++;
+      o.out += bc; o.inn += bd;
+      var mixed = bc > 0 && bd > 0;
+      rs.forEach(function (r) {
+        if (BM.CASH_ACCTS.test(r.acct)) return;
+        var a = BM.acctStrip(r.acct);
+        if (mixed) {                       // 한 전표에 입금과 지급이 같이 있으면 차변 줄은 출금, 대변 줄은 입금으로 본다
+          if (r.dr) { add(o.outBy, a, r.dr); if (BM.AP_ACCTS.test(r.acct)) add(o.apVendors, r.vk || '', r.dr); }
+          if (r.cr) add(o.inBy, a, r.cr);
+        } else if (bc > 0) {                // 출금 전표: 상대 계정의 순액(차변-대변)
+          add(o.outBy, a, r.dr - r.cr); if (BM.AP_ACCTS.test(r.acct)) add(o.apVendors, r.vk || '', r.dr - r.cr);
+        } else add(o.inBy, a, r.cr - r.dr);
+      });
+    });
+    // 합계와 내역이 어긋나는 몫은 숨기지 않고 한 줄로 보인다
+    var so = BM.sum(Object.keys(o.outBy), function (k) { return o.outBy[k]; }), si = BM.sum(Object.keys(o.inBy), function (k) { return o.inBy[k]; });
+    if (Math.abs(o.out - so) >= 1) o.outBy['(차감·기타 조정)'] = o.out - so;
+    if (Math.abs(o.inn - si) >= 1) o.inBy['(차감·기타 조정)'] = o.inn - si;
+    return o;
+  };
+
   /* BEP·분석에 쓸 기본 기간: 거래내역이 있고 분개장이 마감된 달 */
   BM.defaultMonths = function (m, pl, rc) {
     var recon = {}; (rc.months || []).forEach(function (r) { recon[r.ym] = r; });

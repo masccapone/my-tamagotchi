@@ -60,6 +60,17 @@ if (trades.length) {
   tv.forEach(v => { S.m.months.forEach(ym => { const t = tons(v, ym); if (t <= 0) return; const h = head(run('q11', { vendorText: nameOf[v], month: ym })); check('업체×월 물량(q11)', nameOf[v] + ' ' + ym, hasNum(h, t, 0.06), h.slice(0, 70)); });
     const p = latestPrice(v); if (p != null) { const h = head(run('q10', { vendorText: nameOf[v] })); check('업체 단가(q10)', nameOf[v], hasNum(h, p, 0.06), h.slice(0, 70)); } });
 }
+// 4b) 월별 통장 출금·입금(q19): 전표번호별로 묶지 않고 '통장 줄이 있는 전표에 통장 아닌 줄이 있는지'를 먼저 센 뒤 합산
+S.m.months.forEach(ym => {
+  const rs = rows.filter(r => r.ym === ym); const hasOther = {}, vs = {};
+  rs.forEach(r => { const k = r.date + '#' + r.no; if (!/^(보통예금|당좌예금|현금|현금및현금성자산)$/.test(r.acct)) hasOther[k] = 1; });
+  let o = 0, i = 0, bank = 0;
+  rs.forEach(r => { if (/^(보통예금|당좌예금|현금|현금및현금성자산)$/.test(r.acct)) { bank += r.dr - r.cr; if (hasOther[r.date + '#' + r.no]) { o += r.cr; i += r.dr; } } });
+  if (o + i <= 1) return;
+  const h = head(run('q19', { month: ym }));
+  check('월별 통장 출금·입금(q19)', ym, hasNum(h, o, 1) && hasNum(h, i, 1), h.slice(0, 80));
+  const net = Math.abs(i - o - bank) < 1; check('통장 입출금-잔액증감 항등(q19)', ym, net, '입금-출금 ' + (i - o) + ' vs 증감 ' + bank);
+});
 // 5) 전체 합계 일관성
 { const tot = sum(arV, v => Math.max(0, arNet(v))), h = head(run('q12', {})); check('미수금 전체 합계(q12)', '전체', hasNum(h, tot, 1), h.slice(0, 70)); }
 console.log('전수 검증 결과 (독립 계산 값이 답변 제목에 그대로 나오는지)\n');

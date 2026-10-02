@@ -444,6 +444,24 @@
       body: '<ul class="wl">' + ordered.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>', notes: rev ? ['아래는 전체 점검 결과입니다.'] : [] };
   } });
 
+  /* 19. 통장 출금·입금 */
+  Q.push({ id: 'q19', label: '[월]에 통장에서 실제 나간 돈과 들어온 돈은?', needs: ['month'], run: function (c) {
+    var f = BM.cashFlow(c.m, c.month);
+    if (!f.vouchers) return { headline: BM.ymLabel(c.month) + '에 통장(보통예금·당좌예금) 입출금 전표가 없습니다.', body: '', notes: [] };
+    var b = c.pl.filter(function (x) { return x.ym === c.month; })[0];
+    function top(by, n) { return Object.keys(by).filter(function (k) { return by[k] > 0; }).sort(function (a, b) { return by[b] - by[a]; }).slice(0, n); }
+    var oT = top(f.outBy, 8), iT = top(f.inBy, 8);
+    var apV = Object.keys(f.apVendors).sort(function (a, b) { return f.apVendors[b] - f.apVendors[a]; }).slice(0, 8);
+    var net = f.inn - f.out;
+    var head = BM.ymLabel(c.month) + ' 통장 출금 ' + BM.won(f.out) + ', 입금 ' + BM.won(f.inn) + ' (순증감 ' + (net >= 0 ? '+' : '-') + BM.won(Math.abs(net)) + '). 큰 출금: ' + oT.slice(0, 3).map(function (k) { return k + ' ' + BM.won(f.outBy[k]); }).join(', ') + '.';
+    return { headline: head,
+      body: '<div class="tiles">' + tile('통장 출금', BM.won(f.out)) + tile('통장 입금', BM.won(f.inn)) + tile('발생비용(손익 기준)', b ? BM.won(b.incurred) : '-', '지급 시점과 무관한 비용') + '</div>' +
+        '<h4>출금 내역 (상대 계정별)</h4>' + tbl(['계정', '금액'], oT.map(function (k) { return [esc(k), BM.won(f.outBy[k])]; }), [1]) +
+        (apV.length ? '<h4>미지급금 결제 상위 업체</h4>' + tbl(['업체', '금액'], apV.map(function (k) { return [esc(k ? c.m.vendorName(k) : '(거래처 없음)'), BM.won(f.apVendors[k])]; }), [1]) : '') +
+        '<h4>입금 내역 (상대 계정별)</h4>' + tbl(['계정', '금액'], iT.map(function (k) { return [esc(k), BM.won(f.inBy[k])]; }), [1]),
+      notes: ['전표일 기준이라 실제 이체일과 다를 수 있습니다. 대출 상환, 외상대금 결제, 보증금 등 비용이 아닌 출금도 포함됩니다.', '"비용"과 다릅니다: 비용은 발생 시점, 이 답은 통장에서 실제로 돈이 움직인 기준입니다.'] };
+  } });
+
   /* 18. 범위 밖(예측) 질문: 정직하게 한계를 밝힌다 */
   Q.push({ id: 'q18', hidden: true, label: '앞으로 매출은 어떻게 될까?', needs: [], run: function (c) {
     var last = c.pl.filter(function (b) { return b.rev > 0; }).slice(-4, -1), avg = last.length ? sumBy(last, function (b) { return b.rev; }) / last.length : 0;
@@ -473,6 +491,7 @@
     q15: { group: '비용', requires: ['journal'], optional: [], status: '잠정', def: '해당 월 제조원가·판관비·영업외비용 합계와 큰 항목 순위.' },
     q16: { group: '비용', requires: ['journal'], optional: [], status: '잠정', def: '직전 달(또는 지정한 기준 달) 대비 계정별 증가액 순위.' },
     q17: { group: '점검', requires: ['journal'], optional: ['거래내역(매출 대조)'], status: '확정', def: '차대 불균형 전표, 중복 입력 의심, 수량×단가 불일치, 기초 잔액 누락, 거래내역과의 매출 대조 결과.' },
+    q19: { group: '통장', requires: ['journal'], optional: [], status: '잠정', def: '보통예금·당좌예금(·현금)의 전표별 순증감을 구해 감소한 전표는 출금, 증가한 전표는 입금으로 합산하고, 상대 계정별 순액으로 구성을 나눔. 전표일 기준(실제 이체일과 다를 수 있음). 비용이 아닌 출금(대출 상환, 외상대금 결제)을 포함.' },
     q18: { group: '범위 밖', requires: ['journal'], optional: [], status: '잠정', def: '예측하지 않음. 최근 3개월 평균 매출만 참고로 제시.' }
   };
   Q.forEach(function (q) { var m = META[q.id]; if (m) { q.group = m.group; q.requires = m.requires; q.optional = m.optional; q.baseStatus = m.status; q.def = m.def; } });

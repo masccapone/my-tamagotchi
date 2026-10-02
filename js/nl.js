@@ -101,6 +101,7 @@
     f.rev = /(매출|판매\s*금액|판매액|수입)/.test(t) && !/(미수|채권)/.test(t);
     f.profit = /(이익|손실|손익|적자|흑자|남았|밑졌|남겼|손해|이득|장사)/.test(t);
     f.exp = /(비용|지출|쓴|썼|나간\s*돈|나갔|나왔)/.test(t);
+    f.out = /(나간\s*돈|출금|지출|쓴\s*돈|나갔)/.test(t);
     f.due = /(이번\s*달|언제|예정|기한|도래|내야|줘야)/.test(t);
     f.both = /(나갈\s*돈.*들어올\s*돈|들어올\s*돈.*나갈\s*돈|자금\s*수지|현금\s*흐름)/.test(t);
     f.top = /(상위|제일\s*큰|가장\s*큰|큰\s*(곳|업체)|많은\s*(곳|업체)|(\d+|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(곳|개|군데|위)|순위)/.test(t);
@@ -174,6 +175,7 @@
         else if (!vendor && f.due && /(들어올|받을)/.test(rt)) id = 'q3';
         else id = 'q13';
       }
+      else if (f.out && !acct && !f.rev) id = 'q19';
       else if (f.rev) id = 'q14';
       else if (acct && (f.exp || f.what || /얼마|나왔|나갔|쓴|총액|합계|내역/.test(rt))) id = 'q4';
       else if (f.exp && (f.top || /(큰|많|제일|가장)/.test(rt))) id = 'q15';
@@ -182,6 +184,7 @@
       else if (acct) id = 'q4';
       if (id === 'q4' && !acct) id = 'q15';
       if (!id) return null;
+      if (id === 'q19' && vendor) unsupported.push({ phrase: vendor.name, reason: '업체별 통장 출금' });
 
       var needsVendor = ['q1', 'q10'].indexOf(id) >= 0;
       var vendorUsed = ['q1', 'q2', 'q10', 'q11', 'q12', 'q13', 'q14'].indexOf(id) >= 0;
