@@ -106,6 +106,12 @@ td.r, th.r { text-align: right; white-space: nowrap; }
 .estbox details { margin-top: 4px; }
 .estbox details summary { margin: 0; font-weight: 400; font-size: 13px; color: var(--text-muted); }
 .estbox details div { margin-top: 4px; font-size: 13px; }
+.meta { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+.metawarn { margin-top: 4px; color: var(--bad-text); }
+.st { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin-right: 6px; }
+.st.fixed { background: var(--ok-bg); color: var(--ok-text); }
+.st.prov { background: var(--warn-bg); color: var(--warn-text); }
+.st.est { background: var(--bad-bg); color: var(--bad-text); }
 .chartbox { position: relative; height: 260px; }
 .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
@@ -163,6 +169,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 28px 0 12px; }
 <script src="js/model.js"></script>
 <script src="js/analysis.js"></script>
 <script src="js/questions.js"></script>
+<script src="js/nl.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

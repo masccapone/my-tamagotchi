@@ -71,15 +71,15 @@
     var tiles = [
       tile('매출채권 잔액', BM.eok(arOpen), '90일 초과 ' + BM.eok(over90) + ' · ' + ar.vendors.filter(function (v) { return v.open > 0; }).length + '개 업체'),
       tile('미지급금 잔액', BM.eok(apOpen), ap.vendors.filter(function (v) { return v.open > 0; }).length + '개 거래처 · 카드대금 등 포함'),
-      last ? tile(BM.ymLabel(last.ym) + ' 손익' + (useEst && last.estAdj > 0 ? ' (결산 예상 반영)' : ' (발생비용 기준)'), '<span class="' + (lastVal < 0 ? 'neg' : '') + '">' + BM.eok(lastVal) + '</span>', last.estAdj > 0 && useEst ? '추정치 · 결산성 비용 ' + BM.eok(last.estAdj) + ' 포함' : '마감이 확인된 가장 최근 달') : ''
+      last ? tile(BM.ymLabel(last.ym) + ' 손익' + (useEst && last.estAdj > 0 ? ' (관리용 추정)' : ' (발생비용 기준)'), '<span class="' + (lastVal < 0 ? 'neg' : '') + '">' + BM.eok(lastVal) + '</span>', last.estAdj > 0 && useEst ? '추정 · 범위 ' + BM.eok(last.plEstLow) + ' ~ ' + BM.eok(last.plEstHigh) + ' · 결산성 비용 ' + BM.eok(last.estAdj) + ' 포함' : '잠정 · 마감이 확인된 가장 최근 달') : ''
     ].join('');
     var estBox = '';
     if (hasEst) {
-      estBox = '<div class="estbox"><label><input type="checkbox" id="use-est"' + (useEst ? ' checked' : '') + '> 결산 예상 조정 반영 (추정)</label>' +
+      estBox = '<div class="estbox"><label><input type="checkbox" id="use-est"' + (useEst ? ' checked' : '') + '> 결산성 비용 예상 반영 (추정)</label>' +
         '<details><summary>어떻게 추정했나요?</summary><div>분기 말에만 입력되는 감가상각·퇴직급여·충당부채·주식보상·이자 정산 비용은 ' +
         est.basis.map(function (x) { return x.replace('Q', '년 ') + '분기'; }).join(', ') + ' 평균(분기 ' + BM.eok(est.perQuarterTotal) + ')으로 추정합니다. ' +
         est.quarters.map(function (x) { return x.q.replace('Q', '년 ') + '분기는 ' + (x.frac >= 0.99 ? '' : '경과분 ') + BM.eok(x.total) + ' 추가 (' + Object.keys(x.missing).map(function (k) { return k + ' ' + BM.eok(x.missing[k]); }).join(', ') + ')'; }).join('. ') +
-        '. 3분기 중 신규 설비 완공 등으로 실제 감가상각이 달라지면 오차가 생깁니다. 결산 전표가 분개장에 들어오면 자동으로 실제 값으로 대체됩니다.</div></details></div>';
+        '. ' + (est.backtest ? '과거 검증(' + est.backtest.actualQ.replace('Q', '년 ') + '분기를 직전 분기 값으로 추정): 감가상각·퇴직급여 등은 오차 ' + pct(est.backtest.core.err) + ', 이자 정산은 ' + pct(est.backtest.interest.err) + '라서 이자는 범위로 표시합니다. ' : '') + '3분기 중 신규 설비 완공 등으로 실제 감가상각이 달라지면 오차가 생깁니다. 결산 전표가 분개장에 들어오면 자동으로 실제 값으로 대체됩니다.</div></details></div>';
     }
     var w = S.rc.warnings.map(function (x) { return '<li class="' + x.lvl + '">' + esc(x.t) + '</li>'; }).join('');
     $('summary').innerHTML = '<div class="asof">기준일: <b>' + m.asOf + '</b> (분개장 마지막 전표일). 이 날짜 이후의 입금·지급은 반영되지 않았습니다.</div>' +
@@ -87,6 +87,7 @@
       (w ? '<div class="callout warn"><b>데이터 점검 ' + S.rc.warnings.length + '건</b><ul class="wl">' + w + '</ul></div>' : '<div class="callout ok">데이터 점검에서 발견된 문제가 없습니다.</div>');
     bindEst();
   }
+  function pct(x) { return x == null ? '산정 불가' : (x >= 0 ? '+' : '') + (x * 100).toFixed(1) + '%'; }
   function bindEst() {
     var cb = $('use-est');
     if (!cb) return;
@@ -159,16 +160,30 @@
     var a;
     try { a = curQ.run(c); } catch (e) { $('answer').innerHTML = '<div class="callout bad">이 질문을 계산하는 중 오류가 났습니다: ' + esc(e.message) + '</div>'; return; }
     var allNotes = (a.notes || []).concat(notes);
-    $('answer').innerHTML = '<div class="card ans"><div class="headline">' + esc(a.headline) + '</div>' + (a.body || '') +
+    var meta = metaFor(curQ.id, c, a);
+    $('answer').innerHTML = '<div class="card ans">' + meta + '<div class="headline">' + esc(a.headline) + '</div>' + (a.body || '') +
       (allNotes.length ? '<ul class="notes">' + allNotes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
     if (a.after) a.after($('answer'), runQ);
+  }
+
+  /* 모든 답변에 기준일, 확정·잠정·추정 구분, 근거를 붙인다 */
+  var BASE_STATUS = { q1: '추정', q2: '잠정', q3: '추정', q4: '확정', q5: '확정', q6: '잠정', q7: '확정', q8: '추정', q9: '추정', q10: '확정', q11: '확정' };
+  var BASE_SRC = { q1: '분개장(미지급금) + 결제 이력', q2: '분개장(보통예금)', q3: '분개장(채권·채무) + 결제 이력', q4: '분개장', q5: '분개장', q6: '분개장', q7: '분개장', q8: '분개장 + 거래내역', q9: '분개장(보통예금) + 입력한 기준 잔액', q10: '거래내역 + 분개장', q11: '거래내역' };
+  function metaFor(id, c, a) {
+    var st = a.status || BASE_STATUS[id] || '잠정';
+    var b = c.month ? S.pl.filter(function (x) { return x.ym === c.month; })[0] : null;
+    if (b && st === '확정' && b.flags.some(function (f) { return f.k === 'partial' || f.k === 'drop'; })) st = '잠정';
+    var cls = st === '확정' ? 'fixed' : st === '잠정' ? 'prov' : 'est';
+    var bad = S.rc.warnings.filter(function (w) { return w.lvl === 'bad'; }).slice(0, 2);
+    return '<div class="meta"><span class="st ' + cls + '">' + st + '</span> 기준일 ' + S.m.asOf + ' · 근거: ' + esc(BASE_SRC[id] || '분개장') +
+      (bad.length ? '<div class="metawarn">데이터 경고: ' + bad.map(function (w) { return esc(w.t); }).join(' / ') + '</div>' : '') + '</div>';
   }
 
   /* ---------- 월별 추이 ---------- */
   function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
   function renderTrend() {
     var rows = S.pl.filter(function (b) { return b.rev !== 0 || b.incurred > 1e6; }).slice(-12);
-    $('trendtbl').innerHTML = BM.tbl(['월', '매출', '발생비용', '손익(발생기준)', '손익(결산 예상)', '손익(계산서)', '점검'], rows.map(function (b) {
+    $('trendtbl').innerHTML = BM.tbl(['월', '매출', '발생비용', '발생비용 기준', '관리용 추정', '장부 손익', '점검'], rows.map(function (b) {
       var cls = function (v) { return v < 0 ? 'neg' : ''; };
       return [BM.ymLabel(b.ym), BM.won(b.rev), BM.won(b.incurred), '<span class="' + cls(b.plIncurred) + '">' + BM.won(b.plIncurred) + '</span>',
         '<span class="' + cls(b.plEst) + '">' + (b.estAdj > 0 ? BM.won(b.plEst) : '-') + '</span>', '<span class="' + cls(b.plBook) + '">' + BM.won(b.plBook) + '</span>',
