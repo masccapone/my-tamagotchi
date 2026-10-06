@@ -563,6 +563,23 @@
     return out;
   };
 
+  /* 유형자산: 더존 계정코드 쌍(자산 코드, 바로 다음 코드가 감가상각누계액). 분개장에 기초 잔액이 없으므로 분개장 기간 안의 증감만 반영된다. */
+  BM.ASSET_CODES = { '202': '건물', '204': '구축물', '206': '기계장치', '208': '차량운반구', '210': '공구와기구', '212': '비품', '214': '건설중인자산', '219': '시설장치', '225': '사용권자산' };
+  BM.assets = function (m, upTo) {
+    var out = {}, last = upTo || m.asOf;
+    Object.keys(BM.ASSET_CODES).forEach(function (code) {
+      out[code] = { code: code, name: BM.ASSET_CODES[code], cost: 0, accum: 0, nCost: 0, firstDate: '', lastDate: '', lastAccum: '', lastDep: 0 };
+    });
+    m.rows.forEach(function (r) {
+      if (r.date > last || !r.code) return;
+      var c = String(r.code);
+      if (out[c]) { if (r.acct !== out[c].name) return; out[c].cost += r.dr - r.cr; out[c].nCost++; if (r.date > out[c].lastDate) out[c].lastDate = r.date; if (r.dr > r.cr && (!out[c].firstDate || r.date < out[c].firstDate)) out[c].firstDate = r.date; return; }
+      var base = String(+c - 1);
+      if (out[base] && /감가상각누계액/.test(r.acct)) { out[base].accum += r.cr - r.dr; if (r.date > out[base].lastAccum) { out[base].lastAccum = r.date; out[base].lastDep = 0; } if (r.date === out[base].lastAccum) out[base].lastDep += r.cr - r.dr; }
+    });
+    return Object.keys(out).map(function (k) { var o = out[k]; o.book = o.cost - o.accum; o.incomplete = o.cost <= 0 || o.book < 0; return o; }).filter(function (o) { return o.nCost > 0 || o.accum; });
+  };
+
   /* BEP·분석에 쓸 기본 기간: 거래내역이 있고 분개장이 마감된 달 */
   BM.defaultMonths = function (m, pl, rc) {
     var recon = {}; (rc.months || []).forEach(function (r) { recon[r.ym] = r; });

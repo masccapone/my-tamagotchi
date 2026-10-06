@@ -89,6 +89,17 @@ const revenueOf = ym => sum(rows.filter(r => r.ym === ym && /^4/.test(r.code) &&
   const h = head(run('q21', { month: '2026-06', from: '2026-04' }));
   check('매출총이익률(q21)', '2026Q2', h.includes(((rev - cogs) / rev * 100).toFixed(1) + '%'), h.slice(0, 90));
 }
+// 4e) 유형자산(q22): 계정코드 합계로 독립 계산 (206 기계장치 ↔ 207 감가상각누계액 등)
+{
+  const pairs = { 기계장치: ['206', '207'], 차량운반구: ['208', '209'], 비품: ['212', '213'], 시설장치: ['219', '220'], 사용권자산: ['225', '226'] };
+  Object.keys(pairs).forEach(nm => {
+    const [ca, cb] = pairs[nm];
+    const cost = sum(rows.filter(r => String(r.code) === ca && r.acct === nm), r => r.dr - r.cr), acc = sum(rows.filter(r => String(r.code) === cb && /감가상각누계액/.test(r.acct)), r => r.cr - r.dr);
+    if (!cost && !acc) return;
+    const h = head(run('q22', { asset: nm }));
+    check('유형자산 잔액(q22)', nm, hasNum(h, cost, 1) && hasNum(h, acc, 1), h.slice(0, 80));
+  });
+}
 // 5) 전체 합계 일관성
 { const tot = sum(arV, v => Math.max(0, arNet(v))), h = head(run('q12', {})); check('미수금 전체 합계(q12)', '전체', hasNum(h, tot, 1), h.slice(0, 70)); }
 console.log('전수 검증 결과 (독립 계산 값이 답변 제목에 그대로 나오는지)\n');

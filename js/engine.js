@@ -5,8 +5,8 @@
   var BM = g.BM;
   var E = BM.engine = {};
 
-  var BASE_STATUS = { q12: '확정', q13: '추정', q14: '잠정', q15: '잠정', q16: '잠정', q17: '확정', q18: '잠정', q1: '추정', q2: '잠정', q3: '추정', q4: '확정', q5: '확정', q6: '잠정', q7: '확정', q8: '추정', q9: '추정', q10: '확정', q11: '확정', q19: '잠정', q20: '잠정', q21: '추정' };
-  var BASE_SRC = { q12: '분개장(외상매출금)', q13: '분개장(미지급금) + 결제 이력', q14: '분개장 + 거래내역', q15: '분개장', q16: '분개장', q17: '분개장 + 거래내역 대조', q18: '분개장(과거 평균)', q1: '분개장(미지급금) + 결제 이력', q2: '분개장(보통예금)', q3: '분개장(채권·채무) + 결제 이력', q4: '분개장', q5: '분개장', q6: '분개장', q7: '분개장', q8: '분개장 + 거래내역', q9: '분개장(보통예금) + 입력한 기준 잔액', q10: '거래내역 + 분개장', q11: '거래내역', q19: '분개장(보통예금·당좌예금)', q20: '분개장(계정별 월 금액)', q21: '분개장(계정별 월 금액)' };
+  var BASE_STATUS = { q12: '확정', q13: '추정', q14: '잠정', q15: '잠정', q16: '잠정', q17: '확정', q18: '잠정', q1: '추정', q2: '잠정', q3: '추정', q4: '확정', q5: '확정', q6: '잠정', q7: '확정', q8: '추정', q9: '추정', q10: '확정', q11: '확정', q19: '잠정', q20: '잠정', q21: '추정', q22: '잠정' };
+  var BASE_SRC = { q12: '분개장(외상매출금)', q13: '분개장(미지급금) + 결제 이력', q14: '분개장 + 거래내역', q15: '분개장', q16: '분개장', q17: '분개장 + 거래내역 대조', q18: '분개장(과거 평균)', q1: '분개장(미지급금) + 결제 이력', q2: '분개장(보통예금)', q3: '분개장(채권·채무) + 결제 이력', q4: '분개장', q5: '분개장', q6: '분개장', q7: '분개장', q8: '분개장 + 거래내역', q9: '분개장(보통예금) + 입력한 기준 잔액', q10: '거래내역 + 분개장', q11: '거래내역', q19: '분개장(보통예금·당좌예금)', q20: '분개장(계정별 월 금액)', q21: '분개장(계정별 월 금액)', q22: '분개장(유형자산 계정)' };
 
   /* files: [{name, kind:'journal'|'trades'|'vendors', data}] → S | null */
   E.build = function (files) {
@@ -86,7 +86,7 @@
     var needs = q.needs, notes = [];
     var c = { m: S.m, pl: S.pl, ar: S.ar, ap: S.ap, rc: S.rc, bepMonths: S.bepMonths, useEst: opt.useEst !== false, anchor: opt.anchor || null, canEditAnchor: !!opt.canEditAnchor };
     if (needs.indexOf('month') >= 0 || needs.indexOf('month?') >= 0) c.month = p.month || (needs.indexOf('month') >= 0 ? S.m.asOf.slice(0, 7) : null);
-    c.days = p.days || null; c.topN = p.topN || null; c.view = p.view || null; c.focus = p.focus || null; c.baseMonth = p.baseMonth || null; c.from = p.from || null;
+    c.days = p.days || null; c.topN = p.topN || null; c.view = p.view || null; c.focus = p.focus || null; c.baseMonth = p.baseMonth || null; c.from = p.from || null; c.asset = p.asset || null;
     if (needs.indexOf('acct') >= 0 || needs.indexOf('acct?') >= 0) {
       c.acct = p.acct || '';
       if (needs.indexOf('acct') >= 0 && !c.acct) return { error: 'acct-required', q: q };
@@ -149,7 +149,7 @@
 
   /* 해석 결과 실행. 업체가 둘 이상이면 각각 계산해 한 줄로 이어 붙인다. */
   E.runParsed = function (S, r, opt) {
-    var base = { month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth, from: r.from };
+    var base = { month: r.month, acct: r.acct, days: r.days, topN: r.topN, view: r.view, focus: r.focus, baseMonth: r.baseMonth, from: r.from, asset: r.asset };
     if (!(r.vendors && r.vendors.length > 1)) return E.run(S, r.id, Object.assign({ vendorText: r.vendor ? r.vendor.name : '' }, base), opt);
     var runs = r.vendors.slice(0, 4).map(function (v) { return E.run(S, r.id, Object.assign({ vendorText: v.name }, base), opt); });
     var bad = runs.filter(function (x) { return x.error; })[0];

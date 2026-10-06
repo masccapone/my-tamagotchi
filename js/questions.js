@@ -549,6 +549,40 @@
       notes: notes, status: E.length ? '추정' : (st.partial.length ? '잠정' : '확정') };
   } });
 
+  /* 22. 유형자산 잔액 */
+  Q.push({ id: 'q22', label: '[자산 계정] 잔액(취득원가·감가상각누계액·장부가액)은?', needs: ['month?', 'asset?'], run: function (c) {
+    var asOfYm = c.m.asOf.slice(0, 7), endDate = c.month && c.month !== asOfYm ? (function () { var y = +c.month.slice(0, 4), mo = +c.month.slice(5); return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10); })() : c.m.asOf;
+    var all = BM.assets(c.m, endDate);
+    if (!all.length) return { headline: '분개장에서 유형자산 계정(기계장치 등)을 찾지 못했습니다. 계정코드가 더존 체계(206 기계장치 등)여야 합니다.', body: '', notes: [] };
+    var sel = c.asset ? all.filter(function (a) { return a.name === c.asset; }) : all.filter(function (a) { return !a.incomplete; });
+    var skipped = c.asset ? [] : all.filter(function (a) { return a.incomplete; });
+    if (!sel.length) return { headline: (c.asset || '') + ' 계정에 ' + endDate + '까지 입력된 금액이 없습니다.', body: '', notes: [] };
+    var T = { cost: BM.sum(sel, function (a) { return a.cost; }), accum: BM.sum(sel, function (a) { return a.accum; }) };
+    var lastAcc = sel.reduce(function (t, a) { return a.lastAccum > t ? a.lastAccum : t; }, '');
+    var label = c.asset || '유형자산 합계';
+    var bad = c.asset && sel[0].incomplete;
+    var head;
+    if (bad) head = label + ': 분개장에 기초 잔액이 없어 금액을 확정할 수 없습니다. 분개장 기간 안의 증감만 보면 취득원가 ' + BM.won(T.cost) + ', 감가상각누계액 ' + BM.won(T.accum) + '입니다.';
+    else head = label + ' (' + endDate + ' 분개장 기준): 취득원가 ' + BM.won(T.cost) + ', 감가상각누계액 ' + BM.won(T.accum) + (lastAcc ? '(' + lastAcc + '까지 반영)' : '') + ', 장부가액 ' + BM.won(T.cost - T.accum) + '.';
+    // 감가상각이 분기 단위로만 입력되므로, 마지막 반영일 이후 지난 분기 수만큼 직전 분기 상각액을 더 빼 본 추정치를 함께 준다
+    var qEnds = []; if (lastAcc) { var y0 = +lastAcc.slice(0, 4); for (var yy = y0; yy <= +endDate.slice(0, 4); yy++) ['03-31', '06-30', '09-30', '12-31'].forEach(function (d) { var dt = yy + '-' + d; if (dt > lastAcc && dt <= endDate) qEnds.push(dt); }); }
+    var estNote = '';
+    if (!bad && qEnds.length && sel.length === 1 && sel[0].lastDep > 0) {
+      var estBook = Math.max(0, sel[0].book - sel[0].lastDep * qEnds.length);
+      head += ' 결산 전 ' + qEnds.length + '개 분기(' + qEnds.map(function (d) { return d.slice(0, 7); }).join(', ') + ') 감가상각을 직전 분기 상각액 ' + BM.won(sel[0].lastDep) + '으로 추정해 빼면 장부가액 약 ' + BM.won(estBook) + '(추정' + (sel[0].book - sel[0].lastDep * qEnds.length < 0 ? ', 상각 완료로 0원이 하한' : '') + ').';
+    } else if (!bad && qEnds.length) estNote = '결산되지 않은 ' + qEnds.length + '개 분기(' + qEnds.map(function (d) { return d.slice(0, 7); }).join(', ') + ')의 감가상각은 반영되지 않았습니다. 자산별로 물으면 직전 분기 상각액 기준 추정치를 함께 알려 드립니다.';
+    var rows = all.map(function (a) { return [esc(a.name) + (a.incomplete ? ' <span class="badge warn">기초 잔액 누락</span>' : ''), BM.won(a.cost), BM.won(a.accum), BM.won(a.book), a.lastDate || '-', a.lastAccum || '-']; });
+    var okAll = all.filter(function (a) { return !a.incomplete; });
+    if (!c.asset) rows.push(['<b>합계 (기초 잔액 누락 계정 제외)</b>', '<b>' + BM.won(BM.sum(okAll, function (a) { return a.cost; })) + '</b>', '<b>' + BM.won(BM.sum(okAll, function (a) { return a.accum; })) + '</b>', '<b>' + BM.won(BM.sum(okAll, function (a) { return a.book; })) + '</b>', '', '']);
+    var j0 = c.m.rows.reduce(function (t, r) { return r.date < t ? r.date : t; }, '9999');
+    var notes = ['분개장 시작일(' + j0 + ') 이전의 기초 잔액이 분개장에 없어, 이 숫자는 분개장 기간 안의 취득·처분·상각만 반영합니다. 그 이전에 취득한 자산이 있으면 실제보다 적게 나옵니다.'];
+    sel.forEach(function (a) { if (!a.incomplete && a.firstDate > j0) notes.push(a.name + '의 첫 취득일은 ' + a.firstDate + '로 분개장 기간 안입니다. 그 이전부터 보유한 ' + a.name + '이 없다면 이 숫자가 전체입니다.'); });
+    if (skipped.length) notes.push('기초 잔액이 분개장에 없어 합계에서 뺀 계정: ' + skipped.map(function (a) { return a.name; }).join(', ') + '. (취득원가가 없거나 마이너스인데 감가상각누계액만 있는 계정입니다.)');
+    notes.push('감가상각누계액은 자산 계정 바로 다음 코드의 계정(예: 206 기계장치 ↔ 207)으로 짝지었습니다. 정부보조금 같은 차감 계정은 반영하지 않았습니다.');
+    if (estNote) notes.push(estNote);
+    return { headline: head, body: '<div class="hint">단위: 원</div>' + tbl(['계정', '취득원가', '감가상각누계액', '장부가액', '최근 변동일', '누계액 최근 반영일'], rows, [1, 2, 3]), notes: notes, status: qEnds.length ? '추정' : '잠정' };
+  } });
+
   /* 18. 범위 밖(예측) 질문: 정직하게 한계를 밝힌다 */
   Q.push({ id: 'q18', hidden: true, label: '앞으로 매출은 어떻게 될까?', needs: [], run: function (c) {
     var last = c.pl.filter(function (b) { return b.rev > 0; }).slice(-4, -1), avg = last.length ? sumBy(last, function (b) { return b.rev; }) / last.length : 0;
@@ -581,6 +615,7 @@
     q19: { group: '통장', requires: ['journal'], optional: [], status: '잠정', def: '보통예금·당좌예금(·현금)의 전표별 순증감을 구해 감소한 전표는 출금, 증가한 전표는 입금으로 합산하고, 상대 계정별 순액으로 구성을 나눔. 전표일 기준(실제 이체일과 다를 수 있음). 비용이 아닌 출금(대출 상환, 외상대금 결제)을 포함.' },
     q20: { group: '손익', requires: ['journal'], optional: [], status: '잠정', def: '분개장 계정별 월 금액(결산 전표 포함)으로 손익계산서 형식(매출-매출원가-판관비-영업외)을 구성하고 월별과 누계를 표시. 매출원가가 결산되지 않은 달이 있으면 장부 이익이 높게 나오므로 발생비용 기준·관리용 추정 손익을 참고로 함께 표시.' },
     q21: { group: '손익', requires: ['journal'], optional: [], status: '추정', def: '매출이익률=매출총이익률=(매출-매출원가)÷매출. 결산이 끝난 분기는 장부 매출원가, 결산 전 달은 그 달 발생 제조원가(+아직 입력되지 않은 결산성 제조원가의 직전 결산 분기 평균 추정)를 매출원가로 대용. 결산된 분기에 같은 방식을 적용한 오차를 함께 표시.' },
+    q22: { group: '자산', requires: ['journal'], optional: [], status: '잠정', def: '더존 계정코드 쌍(206 기계장치↔207 감가상각누계액 등)으로 분개장 기간 안의 (차변-대변) 합을 취득원가, 누계액의 (대변-차변) 합을 감가상각누계액으로 하고 장부가액 = 취득원가 - 누계액. 기초 잔액과 결산 전 감가상각은 반영되지 않음.' },
     q18: { group: '범위 밖', requires: ['journal'], optional: [], status: '잠정', def: '예측하지 않음. 최근 3개월 평균 매출만 참고로 제시.' }
   };
   Q.forEach(function (q) { var m = META[q.id]; if (m) { q.group = m.group; q.requires = m.requires; q.optional = m.optional; q.baseStatus = m.status; q.def = m.def; } });

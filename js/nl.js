@@ -90,6 +90,7 @@
     f.stmt = /(손익\s*계산서|재무\s*제표|\bP\s*\/?\s*L\b)/i.test(t);
     f.margin = /(이익\s*[률율]|마진|수익\s*[률율])/.test(t);
     f.opmargin = /(영업\s*이익\s*[률율]|세전\s*이익\s*[률율]|순\s*이익\s*[률율])/.test(t);
+    f.asset = /(기계장치|기계|차량운반구|비품|시설장치|건물|구축물|건설중인자산|건설\s*중|사용권자산|공구와기구|유형자산|고정자산)/.test(t) && !/(감가상각비|수선|유지|임차|보험|세금|처분\s*손)/.test(t);
     f.cash = /(통장|계좌|잔고|보유\s*현금|현금.{0,6}(얼마|있|보유)|은행.{0,8}(돈|얼마|잔))/.test(t);
     f.neg = /(마이너스|음수)/.test(t);
     f.check = /(맞지\s*않|안\s*맞|어긋|오류|잘못|이상한|이상\s*없|누락|빠진|제대로|맞는\s*거|맞아|점검|검증|입력\s*안|틀린|틀렸|오타|실수)/.test(t);
@@ -156,10 +157,11 @@
         UNSUPPORTED.forEach(function (u) { var mm = u[0].exec(ut); if (mm) unsupported.push({ phrase: mm[0], reason: u[1] }); });
       }
       var days = findDays(rt), topN = findTopN(rt);
-      var from = null;
+      var from = null, asset = null;
 
       if (f.forecast) id = 'q18';
       else if (f.bep) id = 'q8';
+      else if (f.asset) id = 'q22';
       else if (f.stmt) id = 'q20';
       else if (f.opmargin || f.margin) id = 'q21';
       else if (f.cash) id = 'q9';
@@ -204,6 +206,10 @@
         else if (month && !/(올해|금년|누계|누적|연초|지금까지)/.test(text)) from = month;
         else { if (!month) month = lastFull; from = month.slice(0, 4) + '-01'; }
       }
+      if (id === 'q22') {
+        var AM = [[/기계장치|기계/, '기계장치'], [/차량운반구|차량/, '차량운반구'], [/비품/, '비품'], [/시설장치/, '시설장치'], [/건설중인자산|건설\s*중/, '건설중인자산'], [/사용권자산/, '사용권자산'], [/공구와기구/, '공구와기구'], [/구축물/, '구축물'], [/건물/, '건물']];
+        AM.forEach(function (a) { if (!asset && a[0].test(text)) asset = a[1]; });
+      }
       if (!id) return null;
       if (id === 'q19' && vendor) unsupported.push({ phrase: vendor.name, reason: '업체별 통장 출금' });
 
@@ -225,7 +231,7 @@
       if (id === 'q4' && !acct) ambiguous.push('비용 항목');
       var baseMonth = null;
       if (id === 'q16') { var ms = []; var rg = /(\d{1,2})\s*월/g, mm; while ((mm = rg.exec(text))) { if (+mm[1] >= 1 && +mm[1] <= 12) ms.push(findMonth(mm[1] + '월', ctx)); } if (ms.length > 1) baseMonth = ms.slice().sort()[0]; }
-      return { id: id, vendor: unknown ? null : vendor, unknownVendor: unknown, month: month, baseMonth: baseMonth, from: from, acct: acct, days: days, topN: topN, view: view, focus: focus, ambiguous: ambiguous, unsure: unsure, unsupported: unsupported, vendors: vendors.length > 1 ? vendors : null, hits: [] };
+      return { id: id, vendor: unknown ? null : vendor, unknownVendor: unknown, month: month, baseMonth: baseMonth, from: from, asset: asset, acct: acct, days: days, topN: topN, view: view, focus: focus, ambiguous: ambiguous, unsure: unsure, unsupported: unsupported, vendors: vendors.length > 1 ? vendors : null, hits: [] };
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
